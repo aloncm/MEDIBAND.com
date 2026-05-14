@@ -116,6 +116,7 @@ button {
 #login-view {
     justify-content: center;
     align-items: center;
+    flex-direction: column;
     background-color: #ffffff;
 }
 
@@ -209,7 +210,7 @@ button {
     border-radius: 8px;
     background: var(--bg-color);
     font-size: 0.9rem;
-    transition: all 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
     outline: none;
 }
 
@@ -339,6 +340,7 @@ button {
 .sidebar-footer {
     padding: 20px;
     border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .system-status {
@@ -867,7 +869,21 @@ textarea:focus {
 /* Responsive Media Queries */
 @media (max-width: 992px) {
     .view-section.active {
-        display: block !important;
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    /* ── LOGIN centrado en móvil ── */
+    #login-view {
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+    }
+
+    .login-container {
+        width: 100%;
+        max-width: 420px;
+        padding: 0;
     }
 
     .sidebar {
@@ -880,12 +896,21 @@ textarea:focus {
         box-shadow: 10px 0 30px rgba(0,0,0,0.1);
         display: flex !important;
         flex-direction: column !important;
+        overflow-y: auto;
     }
     
     .sidebar.mobile-active {
         transform: translateX(0);
     }
     
+    /* Logout siempre visible en sidebar móvil */
+    .sidebar-footer {
+        position: sticky;
+        bottom: 0;
+        background: var(--sidebar-bg);
+        z-index: 1;
+    }
+
     .main-content {
         width: 100% !important;
         height: 100vh;
@@ -903,6 +928,32 @@ textarea:focus {
 
 
 @media (max-width: 768px) {
+    /* ── LOGIN: logo más pequeño y centrado ── */
+    .logo-icon {
+        width: 200px;
+        height: 180px;
+    }
+
+    #login-view {
+        padding: 16px;
+    }
+
+    .login-container {
+        padding: 0;
+    }
+
+    /* ── ANTI-ZOOM iOS: font-size >= 16px en inputs ── */
+    .input-wrapper input,
+    textarea,
+    select,
+    input[type="email"],
+    input[type="password"],
+    input[type="text"],
+    input[type="date"],
+    input[type="number"] {
+        font-size: 16px !important;
+    }
+
     .dashboard-grid, .dashboard-extras, .stats-row {
         grid-template-columns: 1fr !important;
     }
@@ -925,7 +976,7 @@ textarea:focus {
     }
     
     .search-bar {
-        display: none; /* Hide search in small mobile to save space */
+        display: none;
     }
     
     .content-section {
@@ -935,5 +986,30 @@ textarea:focus {
     .modal-content {
         padding: 20px;
         width: 95%;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    /* ── BOTÓN CERRAR SESIÓN siempre visible ── */
+    .btn-logout {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        background: var(--bg-color);
+        color: var(--text-main);
+        border: 1px solid var(--border-color);
+        padding: 12px;
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+
+    /* Reducir status cards en sidebar para dar espacio al logout */
+    .system-status {
+        padding: 8px;
+        margin-bottom: 8px;
+    }
+
+    .sidebar-footer {
+        padding: 12px;
     }
 }
