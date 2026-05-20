@@ -86,6 +86,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // ON LOGOUT
         appView.classList.remove('active');
         loginView.classList.add('active');
+        
+        // Clear patient param on logout so login view has a clean URL
+        const newUrl = new URL(window.location.href);
+        if (newUrl.searchParams.has('patient')) {
+            newUrl.searchParams.delete('patient');
+            window.history.replaceState({}, '', newUrl.href);
+        }
+        nfcStatusBadge.style.display = 'none';
+    });
+
+    // Handle back/forward browser buttons (popstate)
+    window.addEventListener('popstate', (e) => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const patientId = urlParams.get('patient');
+        if (patientId) {
+            navigateTo('records-section');
+            loadPatientDetails(patientId);
+        } else {
+            navigateTo('dashboard-section');
+            loadDashboardStats();
+        }
     });
 });
 
@@ -345,6 +366,21 @@ function setupEventListeners() {
             row.style.display = text.includes(query) ? '' : 'none';
         });
     });
+
+    // Header Search Patient
+    const searchPatientInput = document.getElementById('search-patient');
+    if (searchPatientInput) {
+        searchPatientInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const query = e.target.value.trim();
+                if (query) {
+                    navigateTo('records-section');
+                    loadPatientDetails(query);
+                    e.target.value = ''; // Clear search field
+                }
+            }
+        });
+    }
 }
 
 function navigateTo(targetId) {
@@ -355,6 +391,15 @@ function navigateTo(targetId) {
     // Update sections
     contentSections.forEach(section => section.classList.remove('active'));
     document.getElementById(targetId).classList.add('active');
+
+    // Clean up patient ID from URL when navigating away from the clinical record section
+    if (targetId !== 'records-section') {
+        const newUrl = new URL(window.location.href);
+        if (newUrl.searchParams.has('patient')) {
+            newUrl.searchParams.delete('patient');
+            window.history.pushState({}, '', newUrl.href);
+        }
+    }
 }
 
 async function loadPatientDetails(patientIdStr, docId = null) {
@@ -384,6 +429,13 @@ async function loadPatientDetails(patientIdStr, docId = null) {
         
         patientDataView.style.display = 'block';
         await renderPatientNotes(currentPatientDocId);
+
+        // Update browser URL query parameter with the patient ID dynamically
+        const newUrl = new URL(window.location.href);
+        if (newUrl.searchParams.get('patient') !== patientData.patientId) {
+            newUrl.searchParams.set('patient', patientData.patientId);
+            window.history.pushState({ patientId: patientData.patientId }, '', newUrl.href);
+        }
     } else {
         noPatientView.innerHTML = `
             <i class="fa-solid fa-triangle-exclamation text-danger"></i>
