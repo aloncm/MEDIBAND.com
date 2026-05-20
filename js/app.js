@@ -1,5 +1,24 @@
 import { loginUser, logoutUser, monitorAuthState, getCurrentProfile, registerNewDoctor } from './auth.js';
-import { getPatientData, getPatientNotes, addClinicalNote, getAllDoctors, seedDummyData, createPatient, getAllPatients, updateClinicalNote, deleteClinicalNote, updatePatient, deletePatient } from './database.js';
+import { 
+    getPatientData, 
+    getPatientNotes, 
+    addClinicalNote, 
+    getAllDoctors, 
+    seedDummyData, 
+    createPatient, 
+    getAllPatients, 
+    updateClinicalNote, 
+    deleteClinicalNote, 
+    updatePatient, 
+    deletePatient, 
+    addAuditLog, 
+    getAuditLogs,
+    sendEmergencyAlert,
+    listenEmergencyAlerts,
+    confirmAlertReception,
+    sendChatMessage,
+    listenChatMessages
+} from './database.js';
 
 // DOM Elements
 const loginView = document.getElementById('login-view');
@@ -36,12 +55,188 @@ const registerForm = document.getElementById('register-form');
 // State
 let currentPatientDocId = null;
 let editingNoteId = null;
+let currentLoginType = 'doctor'; // 'doctor' or 'patient'
+
+// Real-time listener unsubscribers
+let alertsUnsubscribe = null;
+let currentChatUnsubscribe = null;
+let patientProfileUnsubscribe = null;
+
+// Audio context & generators
+let audioCtx = null;
+let alarmInterval = null;
+let simulatedCallInterval = null;
+
+// Play alternating premium clinical beeps (Web Audio API)
+function playClinicalAlarm() {
+    if (alarmInterval) return;
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+    let alternating = true;
+    alarmInterval = setInterval(() => {
+        try {
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            osc.frequency.value = alternating ? 880 : 1000;
+            alternating = !alternating;
+            osc.type = 'sine';
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.35, audioCtx.currentTime + 0.04);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.3);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.35);
+        } catch (err) {
+            console.error("Clinical Audio error:", err);
+        }
+    }, 450);
+}
+
+function stopClinicalAlarm() {
+    if (alarmInterval) {
+        clearInterval(alarmInterval);
+        alarmInterval = null;
+    }
+}
+
+// Play simulated ringing tone for emergency calls (dual-frequency US signal)
+function playRingingTone() {
+    if (simulatedCallInterval) return;
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+    simulatedCallInterval = setInterval(() => {
+        try {
+            const osc1 = audioCtx.createOscillator();
+            const osc2 = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc1.connect(gainNode);
+            osc2.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            osc1.frequency.value = 440;
+            osc2.frequency.value = 480;
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.1);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.8);
+            osc1.start();
+            osc2.start();
+            osc1.stop(audioCtx.currentTime + 1.9);
+            osc2.stop(audioCtx.currentTime + 1.9);
+        } catch (err) {
+            console.error("Ringing Audio error:", err);
+        }
+    }, 2000);
+}
+
+function stopRingingTone() {
+    if (simulatedCallInterval) {
+        clearInterval(simulatedCallInterval);
+        simulatedCallInterval = null;
+    }
+}
+
+// Cleans up all listeners to avoid performance degradation
+function cleanupActiveListeners() {
+    if (alertsUnsubscribe) {
+        alertsUnsubscribe();
+        alertsUnsubscribe = null;
+    }
+    if (currentChatUnsubscribe) {
+        currentChatUnsubscribe();
+        currentChatUnsubscribe = null;
+    }
+    if (patientProfileUnsubscribe) {
+        patientProfileUnsubscribe();
+        patientProfileUnsubscribe = null;
+    }
+    stopClinicalAlarm();
+    stopRingingTone();
+}
+
+// Start emergency alert listener for Doctors
+function startDoctorAlertsListener(specialty) {
+    if (alertsUnsubscribe) return;
+    alertsUnsubscribe = listenEmergencyAlerts(specialty, (alerts) => {
+        const profile = getCurrentProfile();
+        if (!profile || profile.role !== 'doctor') return;
+        
+        // Find an active alert in the last 15 minutes that this doctor has not confirmed yet
+        const fifteenMinutesAgo = Date.now() - 900000;
+        const activeAlert = alerts.find(a => {
+            const timestampMs = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : Date.now();
+            return timestampMs > fifteenMinutesAgo && !a.confirmedBy.includes(profile.uid);
+        });
+        
+        if (activeAlert) {
+            const modal = document.getElementById('emergency-alert-modal');
+            modal.style.display = 'flex';
+            
+            document.getElementById('emergency-alert-specialty').textContent = activeAlert.specialty || specialty;
+            document.getElementById('emergency-alert-patient').textContent = activeAlert.patientName || 'Desconocido';
+            document.getElementById('emergency-alert-procedure').textContent = activeAlert.procedure || 'Emergencia';
+            document.getElementById('emergency-alert-treatment').textContent = activeAlert.medications || 'Revisar expediente';
+            document.getElementById('emergency-alert-doctor').textContent = activeAlert.authorizedBy || 'Guardia';
+            
+            playClinicalAlarm();
+            if (navigator.vibrate) {
+                navigator.vibrate([400, 200, 400, 200, 400]);
+            }
+            
+            const confirmBtn = document.getElementById('btn-confirm-emergency');
+            confirmBtn.onclick = async () => {
+                confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Confirmando...';
+                confirmBtn.disabled = true;
+                await confirmAlertReception(activeAlert.id, profile.uid);
+                confirmBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> CONFIRMAR RECEPCIÓN DE ALERTA';
+                confirmBtn.disabled = false;
+                stopClinicalAlarm();
+                modal.style.display = 'none';
+            };
+        } else {
+            stopClinicalAlarm();
+            document.getElementById('emergency-alert-modal').style.display = 'none';
+        }
+    });
+}
+
+// Populate Primary Doctors Select based on specialty
+async function populatePrimaryDoctorsSelect(specialtyValue, selectEl, selectedDocId = "") {
+    selectEl.innerHTML = '<option value="">Cargando médicos...</option>';
+    const doctors = await getAllDoctors();
+    const deptDocs = doctors.filter(doc => doc.department === specialtyValue);
+    
+    selectEl.innerHTML = '';
+    if (deptDocs.length === 0) {
+        selectEl.innerHTML = '<option value="">Sin médicos en esta especialidad</option>';
+        return;
+    }
+    
+    deptDocs.forEach(doc => {
+        const option = document.createElement('option');
+        option.value = doc.id;
+        option.textContent = `Dr. ${doc.name} (${doc.shift || 'matutino'})`;
+        if (doc.id === selectedDocId) {
+            option.selected = true;
+        }
+        selectEl.appendChild(option);
+    });
+}
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
-    // Set current date
     const dateOptions = { month: 'short', day: 'numeric', year: 'numeric' };
     document.getElementById('current-date').textContent = new Date().toLocaleDateString('es-ES', dateOptions);
+
+    // Seed dummy database entries
+    seedDummyData();
 
     // Setup Event Listeners
     setupEventListeners();
@@ -50,33 +245,58 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const nfcPatientId = urlParams.get('patient');
     
-    // Monitor Authentication
+    // Monitor Authentication State
     monitorAuthState((user, profile) => {
         // ON LOGIN
         loginView.classList.remove('active');
         appView.classList.add('active');
         
+        cleanupActiveListeners();
+        
         if (profile) {
             userNameEl.textContent = profile.name || user.email;
-            userRoleEl.textContent = profile.department || 'Personal';
+            userRoleEl.textContent = profile.role === 'patient' ? 'Paciente' : (profile.department || 'Personal');
             
-            // Show Admin section if role is admin
-            if (profile.role === 'admin') {
-                const adminNavItem = document.querySelector('.admin-only');
-                if (adminNavItem) adminNavItem.style.display = 'flex';
-                loadAdminData();
+            if (profile.role === 'patient') {
+                // Adjust Patient Layout
+                document.getElementById('doctor-nav').style.display = 'none';
+                document.getElementById('patient-nav').style.display = 'flex';
+                document.querySelector('.search-bar').style.display = 'none';
+                document.getElementById('btn-open-register').style.display = 'none';
+                
+                navigateTo('patient-portal-section');
+                startPatientPortal(profile);
+            } else {
+                // Adjust Doctor Layout
+                document.getElementById('doctor-nav').style.display = 'flex';
+                document.getElementById('patient-nav').style.display = 'none';
+                document.querySelector('.search-bar').style.display = 'flex';
+                document.getElementById('btn-open-register').style.display = 'block';
+                
+                if (profile.role === 'admin') {
+                    const adminNavItem = document.querySelector('.admin-only');
+                    if (adminNavItem) adminNavItem.style.display = 'flex';
+                    loadAdminData();
+                } else {
+                    const adminNavItem = document.querySelector('.admin-only');
+                    if (adminNavItem) adminNavItem.style.display = 'none';
+                }
+                
+                navigateTo('dashboard-section');
+                loadDashboardStats();
+                loadPatientDirectory();
+                
+                // Monitor alerts for Doctor's department
+                if (profile.department) {
+                    startDoctorAlertsListener(profile.department);
+                }
             }
-            
-            // Load Dashboard Stats
-            loadDashboardStats();
-            // Load Patient Directory
-            loadPatientDirectory();
         } else {
             userNameEl.textContent = user.email;
         }
 
-        // If NFC tag was scanned, load patient data automatically
-        if (nfcPatientId) {
+        // If NFC tag was scanned and user is DOCTOR/ADMIN, load patient data automatically
+        if (nfcPatientId && profile && profile.role !== 'patient') {
             nfcStatusBadge.style.display = 'inline-block';
             navigateTo('records-section');
             loadPatientDetails(nfcPatientId);
@@ -84,10 +304,10 @@ document.addEventListener('DOMContentLoaded', () => {
         
     }, () => {
         // ON LOGOUT
+        cleanupActiveListeners();
         appView.classList.remove('active');
         loginView.classList.add('active');
         
-        // Clear patient param on logout so login view has a clean URL
         const newUrl = new URL(window.location.href);
         if (newUrl.searchParams.has('patient')) {
             newUrl.searchParams.delete('patient');
@@ -96,42 +316,92 @@ document.addEventListener('DOMContentLoaded', () => {
         nfcStatusBadge.style.display = 'none';
     });
 
-    // Handle back/forward browser buttons (popstate)
     window.addEventListener('popstate', (e) => {
         const urlParams = new URLSearchParams(window.location.search);
         const patientId = urlParams.get('patient');
-        if (patientId) {
-            navigateTo('records-section');
-            loadPatientDetails(patientId);
-        } else {
-            navigateTo('dashboard-section');
-            loadDashboardStats();
+        const profile = getCurrentProfile();
+        if (profile && profile.role !== 'patient') {
+            if (patientId) {
+                navigateTo('records-section');
+                loadPatientDetails(patientId);
+            } else {
+                navigateTo('dashboard-section');
+                loadDashboardStats();
+            }
         }
     });
 });
 
 function setupEventListeners() {
-    // Login Form
+    // Sliding Login Tab Selector
+    const selectorDoctor = document.getElementById('selector-doctor');
+    const selectorPatient = document.getElementById('selector-patient');
+    const doctorFields = document.getElementById('doctor-login-fields');
+    const patientFields = document.getElementById('patient-login-fields');
+
+    if (selectorDoctor && selectorPatient) {
+        selectorDoctor.addEventListener('click', () => {
+            currentLoginType = 'doctor';
+            selectorDoctor.classList.add('active');
+            selectorPatient.classList.remove('active');
+            selectorDoctor.style.background = 'var(--card-bg)';
+            selectorDoctor.style.color = 'var(--primary)';
+            selectorPatient.style.background = 'transparent';
+            selectorPatient.style.color = 'var(--text-muted)';
+            doctorFields.style.display = 'block';
+            patientFields.style.display = 'none';
+        });
+
+        selectorPatient.addEventListener('click', () => {
+            currentLoginType = 'patient';
+            selectorPatient.classList.add('active');
+            selectorDoctor.classList.remove('active');
+            selectorPatient.style.background = 'var(--card-bg)';
+            selectorPatient.style.color = 'var(--primary)';
+            selectorDoctor.style.background = 'transparent';
+            selectorDoctor.style.color = 'var(--text-muted)';
+            doctorFields.style.display = 'none';
+            patientFields.style.display = 'block';
+        });
+    }
+
+    // Login Form Submit
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const email = document.getElementById('login-email').value;
-        const pass = document.getElementById('login-password').value;
         const btn = document.getElementById('btn-login');
         const errorEl = document.getElementById('login-error');
         
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Autenticando...';
         btn.disabled = true;
+        errorEl.textContent = '';
         
-        const result = await loginUser(email, pass);
-        
-        if (!result.success) {
-            errorEl.textContent = result.message;
-            btn.innerHTML = 'Entrar al Sistema <i class="fa-solid fa-arrow-right"></i>';
-            btn.disabled = false;
+        if (currentLoginType === 'doctor') {
+            const email = document.getElementById('login-email').value;
+            const pass = document.getElementById('login-password').value;
+            const result = await loginUser(email, pass);
+            if (!result.success) {
+                errorEl.textContent = result.message;
+                btn.innerHTML = 'Entrar al Sistema <i class="fa-solid fa-arrow-right"></i>';
+                btn.disabled = false;
+            }
+        } else {
+            const patientId = document.getElementById('patient-login-id').value;
+            const dob = document.getElementById('patient-login-dob').value;
+            if (!patientId || !dob) {
+                errorEl.textContent = "Por favor ingrese el ID NFC y la Fecha de Nacimiento.";
+                btn.innerHTML = 'Entrar al Sistema <i class="fa-solid fa-arrow-right"></i>';
+                btn.disabled = false;
+                return;
+            }
+            const result = await loginPatient(patientId, dob);
+            if (!result.success) {
+                errorEl.textContent = result.message;
+                btn.innerHTML = 'Entrar al Sistema <i class="fa-solid fa-arrow-right"></i>';
+                btn.disabled = false;
+            }
         }
     });
 
-    // Logout Button
     btnLogout.addEventListener('click', () => {
         logoutUser();
     });
@@ -147,32 +417,27 @@ function setupEventListeners() {
         });
     }
 
-    // Close sidebar when clicking main content on mobile
     mainContent.addEventListener('click', () => {
         if (sidebar.classList.contains('mobile-active')) {
             sidebar.classList.remove('mobile-active');
         }
     });
 
-    // Navigation
     navItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const targetId = item.getAttribute('data-target');
             navigateTo(targetId);
             
-            // Specific loads
             if (targetId === 'patients-section') loadPatientDirectory();
             if (targetId === 'dashboard-section') loadDashboardStats();
             
-            // Close mobile sidebar on click
             if (sidebar.classList.contains('mobile-active')) {
                 sidebar.classList.remove('mobile-active');
             }
         });
     });
 
-    // Modal Triggers
     btnAddNote.addEventListener('click', () => {
         renderSpecialtyFields();
         noteModal.classList.add('active');
@@ -182,21 +447,37 @@ function setupEventListeners() {
         doctorModal.classList.add('active');
     });
 
+    const regSpecialty = document.getElementById('reg-specialty');
+    const regPrimaryDoc = document.getElementById('reg-primary-doc');
+    if (regSpecialty && regPrimaryDoc) {
+        regSpecialty.addEventListener('change', (e) => {
+            populatePrimaryDoctorsSelect(e.target.value, regPrimaryDoc);
+        });
+    }
+
     btnOpenRegister.addEventListener('click', () => {
         document.getElementById('register-modal-title').textContent = "Registrar Nuevo Paciente";
         document.getElementById('reg-doc-id').value = "";
         registerForm.reset();
+        
+        populatePrimaryDoctorsSelect(regSpecialty.value, regPrimaryDoc);
+        
         registerModal.classList.add('active');
+        setTimeout(() => {
+            if (window.resizeSignatureCanvas) window.resizeSignatureCanvas();
+            if (window.loadSignatureDataUrl) window.loadSignatureDataUrl("");
+        }, 200);
     });
 
     const btnSimulateVitals = document.getElementById('btn-simulate-vitals');
     if (btnSimulateVitals) {
         btnSimulateVitals.addEventListener('click', () => {
-            document.getElementById('note-hr').value = Math.floor(Math.random() * (100 - 60 + 1) + 60); // 60-100 bpm
-            document.getElementById('note-bp').value = `${Math.floor(Math.random() * (135 - 110 + 1) + 110)}/${Math.floor(Math.random() * (85 - 70 + 1) + 70)}`; // 110-135/70-85 mmHg
-            document.getElementById('note-temp').value = (Math.random() * (37.2 - 36.3) + 36.3).toFixed(1); // 36.3-37.2 °C
-            document.getElementById('note-spo2').value = Math.floor(Math.random() * (100 - 95 + 1) + 95); // 95-100 %
+            document.getElementById('note-hr').value = Math.floor(Math.random() * (100 - 60 + 1) + 60);
+            document.getElementById('note-bp').value = `${Math.floor(Math.random() * (135 - 110 + 1) + 110)}/${Math.floor(Math.random() * (85 - 70 + 1) + 70)}`;
+            document.getElementById('note-temp').value = (Math.random() * (37.2 - 36.3) + 36.3).toFixed(1);
+            document.getElementById('note-spo2').value = Math.floor(Math.random() * (100 - 95 + 1) + 95);
             showToast("Signos vitales capturados de los sensores", "info");
+            calculateTriageManchester();
         });
     }
 
@@ -204,45 +485,47 @@ function setupEventListeners() {
     const sidebarPrivacyLink = document.getElementById('sidebar-privacy-link');
     const formPrivacyLink = document.getElementById('form-privacy-link');
     const loginPrivacyLink = document.getElementById('login-privacy-link');
+    const loginPrivacyLinkHeader = document.getElementById('login-privacy-link-header');
     
-    if (sidebarPrivacyLink) {
-        sidebarPrivacyLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (privacyModal) privacyModal.classList.add('active');
-        });
-    }
+    const openPrivacy = (e) => {
+        e.preventDefault();
+        if (privacyModal) privacyModal.classList.add('active');
+    };
     
-    if (formPrivacyLink) {
-        formPrivacyLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (privacyModal) privacyModal.classList.add('active');
-        });
-    }
-    
-    if (loginPrivacyLink) {
-        loginPrivacyLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (privacyModal) privacyModal.classList.add('active');
-        });
-    }
+    if (sidebarPrivacyLink) sidebarPrivacyLink.addEventListener('click', openPrivacy);
+    if (formPrivacyLink) formPrivacyLink.addEventListener('click', openPrivacy);
+    if (loginPrivacyLink) loginPrivacyLink.addEventListener('click', openPrivacy);
+    if (loginPrivacyLinkHeader) loginPrivacyLinkHeader.addEventListener('click', openPrivacy);
 
     closeModals.forEach(btn => {
         btn.addEventListener('click', () => {
             noteModal.classList.remove('active');
             doctorModal.classList.remove('active');
             registerModal.classList.remove('active');
+            const sigModal = document.getElementById('signature-modal');
+            if (sigModal) sigModal.classList.remove('active');
             if (privacyModal) privacyModal.classList.remove('active');
-            editingNoteId = null; // Clear edit mode
+            editingNoteId = null;
             noteForm.reset();
+
+            const badge = document.getElementById('triage-suggested-badge');
+            if (badge) {
+                badge.textContent = 'SIN EVALUAR';
+                badge.style.backgroundColor = '#64748b';
+                badge.setAttribute('data-triage-level', 'no_eval');
+            }
         });
     });
 
-
-    // Handle Note Submission (Advanced)
+    // Handle Note Submission (with shift override compliance check)
     noteForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const profile = getCurrentProfile();
         if (!currentPatientDocId || !profile) return;
+
+        const triageBadge = document.getElementById('triage-suggested-badge');
+        const triageLevel = triageBadge ? triageBadge.getAttribute('data-triage-level') : 'no_eval';
+        const triageLabel = triageBadge ? triageBadge.textContent : 'SIN EVALUAR';
 
         const noteData = {
             subjective: document.getElementById('note-subjective').value,
@@ -252,10 +535,11 @@ function setupEventListeners() {
             bp: document.getElementById('note-bp').value,
             temp: document.getElementById('note-temp').value,
             spo2: document.getElementById('note-spo2').value,
+            triageLevel: triageLevel,
+            triageLabel: triageLabel,
             specialtyData: {}
         };
 
-        // Collect specialty fields
         const specialtyInputs = document.querySelectorAll('.spec-input');
         specialtyInputs.forEach(input => {
             noteData.specialtyData[input.getAttribute('data-field')] = input.value;
@@ -265,23 +549,53 @@ function setupEventListeners() {
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
         btn.disabled = true;
 
+        // Shift Override NOM-024 Check
+        const overridePanel = document.getElementById('shift-override-panel');
+        if (overridePanel && overridePanel.style.display === 'block') {
+            const justification = document.getElementById('override-justification-input').value.trim();
+            if (!justification) {
+                showToast("Se requiere una justificación (NOM-024) para modificar la nota de otro turno.", "error");
+                btn.innerHTML = 'Guardar Evaluación Permanente';
+                btn.disabled = false;
+                return;
+            }
+            noteData.overrideJustification = justification;
+            await addAuditLog(currentPatientDocId, `NOM-024 Shift Override justification: ${justification}`, profile);
+        }
+
         let success = false;
         if (editingNoteId) {
             success = await updateClinicalNote(editingNoteId, noteData);
         } else {
             success = await addClinicalNote(currentPatientDocId, profile, noteData);
+            
+            // Check if we need to dispatch a high-priority clinical emergency alert
+            const eventType = document.getElementById('note-event-type').value;
+            if (eventType === "Cirugía" || eventType === "Cambio de Medicamento" || eventType === "Operación Urgente") {
+                const patientSnap = await getPatientDataByDocId(currentPatientDocId);
+                if (patientSnap) {
+                    await sendEmergencyAlert({
+                        patientId: currentPatientDocId,
+                        patientName: patientSnap.name,
+                        procedure: eventType,
+                        medications: noteData.plan,
+                        authorizedBy: profile.name,
+                        specialty: profile.department || "Cardiología"
+                    });
+                }
+            }
         }
         
         if (success) {
             noteForm.reset();
             noteModal.classList.remove('active');
-            showToast(editingNoteId ? "Evaluación actualizada" : "Evaluación guardada", "success");
-            editingNoteId = null;
-            
-            // Explicitly reload to show the new note and updated vitals
+            if (profile) {
+                await addAuditLog(currentPatientDocId, editingNoteId ? "edit" : "create", profile);
+            }
             if (currentPatientDocId) {
                 await loadPatientDetails(null, currentPatientDocId);
             }
+            showToast(editingNoteId ? "Evaluación clínica modificada" : "Nueva evaluación clínica registrada");
         } else {
             showToast("Error al procesar la evaluación", "error");
         }
@@ -290,13 +604,14 @@ function setupEventListeners() {
         btn.disabled = false;
     });
 
-    // Handle Doctor Creation
+    // Handle Doctor Account Creation
     doctorForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const name = document.getElementById('doc-name').value;
         const email = document.getElementById('doc-email').value;
         const pass = document.getElementById('doc-password').value;
         const dept = document.getElementById('doc-dept').value;
+        const shift = document.getElementById('doc-shift').value;
         const errorEl = document.getElementById('doc-error');
         
         const btn = doctorForm.querySelector('button');
@@ -304,14 +619,13 @@ function setupEventListeners() {
         btn.disabled = true;
         errorEl.textContent = '';
 
-        const result = await registerNewDoctor(name, email, pass, dept);
+        const result = await registerNewDoctor(name, email, pass, dept, shift);
         
         if (result.success) {
             doctorForm.reset();
             doctorModal.classList.remove('active');
-            // Refresh table
             await loadAdminData();
-            alert(`Cuenta creada para ${name}`);
+            showToast(`Cuenta creada para Dr. ${name}`);
         } else {
             errorEl.textContent = result.message;
         }
@@ -324,17 +638,35 @@ function setupEventListeners() {
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const docId = document.getElementById('reg-doc-id').value;
+        const signatureUrl = window.getSignatureDataUrl ? window.getSignatureDataUrl() : "";
+        
+        const regPrimaryDocSelect = document.getElementById('reg-primary-doc');
+        const selectedDocOption = regPrimaryDocSelect.options[regPrimaryDocSelect.selectedIndex];
+
         const data = {
             name: document.getElementById('reg-name').value,
             patientId: document.getElementById('reg-id').value,
             dob: document.getElementById('reg-dob').value,
             bloodType: document.getElementById('reg-blood').value,
-            allergies: document.getElementById('reg-allergies').value
+            allergies: document.getElementById('reg-allergies').value,
+            specialty: document.getElementById('reg-specialty').value,
+            primaryDoctorId: regPrimaryDocSelect.value,
+            primaryDoctorName: selectedDocOption ? selectedDocOption.textContent.split(' (')[0] : "Sin Asignar",
+            secondaryDoctors: []
         };
+
+        if (signatureUrl) {
+            data.signatureUrl = signatureUrl;
+        }
         
         const btn = registerForm.querySelector('button');
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
         btn.disabled = true;
+
+        // Auto-compute authorized collaborative doctors of the same department
+        const doctors = await getAllDoctors();
+        const specialtyDocs = doctors.filter(d => d.department === data.specialty && d.id !== data.primaryDoctorId);
+        data.secondaryDoctors = specialtyDocs.map(d => d.id);
 
         let success = false;
         if (docId) {
@@ -344,6 +676,15 @@ function setupEventListeners() {
         }
         
         if (success) {
+            const profile = getCurrentProfile();
+            if (profile) {
+                const tempPat = await getPatientData(data.patientId);
+                if (tempPat) {
+                    await addAuditLog(tempPat.id, docId ? "edit" : "create", profile);
+                }
+            }
+            if (window.loadSignatureDataUrl) window.loadSignatureDataUrl("");
+
             registerForm.reset();
             registerModal.classList.remove('active');
             showToast(docId ? "Datos del paciente actualizados" : `Paciente ${data.name} registrado`);
@@ -357,7 +698,6 @@ function setupEventListeners() {
         btn.disabled = false;
     });
     
-    // Directory Search
     directorySearch.addEventListener('input', (e) => {
         const query = e.target.value.toLowerCase();
         const rows = patientsTableBody.querySelectorAll('tr');
@@ -367,7 +707,6 @@ function setupEventListeners() {
         });
     });
 
-    // Header Search Patient
     const searchPatientInput = document.getElementById('search-patient');
     if (searchPatientInput) {
         searchPatientInput.addEventListener('keypress', (e) => {
@@ -376,7 +715,133 @@ function setupEventListeners() {
                 if (query) {
                     navigateTo('records-section');
                     loadPatientDetails(query);
-                    e.target.value = ''; // Clear search field
+                    e.target.value = '';
+                }
+            }
+        });
+    }
+
+    // Drawing Canvas logic for Signatures
+    const canvas = document.getElementById('signature-canvas');
+    const clearBtn = document.getElementById('btn-clear-signature');
+    const placeholder = document.getElementById('signature-placeholder');
+    let isDrawing = false;
+    let ctx = null;
+    let lastX = 0;
+    let lastY = 0;
+    
+    if (canvas) {
+        ctx = canvas.getContext('2d');
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        const resizeCanvas = () => {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * (window.devicePixelRatio || 1);
+            canvas.height = rect.height * (window.devicePixelRatio || 1);
+            ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 2.5;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        };
+        
+        window.addEventListener('resize', resizeCanvas);
+        
+        const getCoordinates = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        };
+
+        const startDrawing = (e) => {
+            isDrawing = true;
+            const coords = getCoordinates(e);
+            lastX = coords.x;
+            lastY = coords.y;
+            placeholder.style.display = 'none';
+        };
+
+        const draw = (e) => {
+            if (!isDrawing) return;
+            e.preventDefault();
+            const coords = getCoordinates(e);
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(coords.x, coords.y);
+            ctx.stroke();
+            lastX = coords.x;
+            lastY = coords.y;
+        };
+
+        const stopDrawing = () => {
+            isDrawing = false;
+        };
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseleave', stopDrawing);
+
+        canvas.addEventListener('touchstart', startDrawing);
+        canvas.addEventListener('touchmove', draw);
+        canvas.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('touchcancel', stopDrawing);
+
+        clearBtn.addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            placeholder.style.display = 'flex';
+        });
+        
+        window.getSignatureDataUrl = () => {
+            const blank = document.createElement('canvas');
+            blank.width = canvas.width;
+            blank.height = canvas.height;
+            if (canvas.toDataURL() === blank.toDataURL()) {
+                return "";
+            }
+            return canvas.toDataURL('image/png');
+        };
+        
+        window.loadSignatureDataUrl = (dataUrl) => {
+            if (!dataUrl) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                placeholder.style.display = 'flex';
+                return;
+            }
+            placeholder.style.display = 'none';
+            const img = new Image();
+            img.onload = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
+            };
+            img.src = dataUrl;
+        };
+        
+        window.resizeSignatureCanvas = resizeCanvas;
+    }
+
+    ['note-hr', 'note-bp', 'note-temp', 'note-spo2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', calculateTriageManchester);
+        }
+    });
+
+    const btnExportFhir = document.getElementById('btn-export-fhir');
+    if (btnExportFhir) {
+        btnExportFhir.addEventListener('click', async () => {
+            if (currentPatientDocId) {
+                const patientSnap = await getPatientDataByDocId(currentPatientDocId);
+                if (patientSnap) {
+                    const notes = await getPatientNotes(currentPatientDocId);
+                    exportPatientToFHIR(patientSnap, notes);
                 }
             }
         });
@@ -384,15 +849,12 @@ function setupEventListeners() {
 }
 
 function navigateTo(targetId) {
-    // Update nav classes
     navItems.forEach(nav => nav.classList.remove('active'));
     document.querySelector(`[data-target="${targetId}"]`)?.classList.add('active');
 
-    // Update sections
     contentSections.forEach(section => section.classList.remove('active'));
     document.getElementById(targetId).classList.add('active');
 
-    // Clean up patient ID from URL when navigating away from the clinical record section
     if (targetId !== 'records-section') {
         const newUrl = new URL(window.location.href);
         if (newUrl.searchParams.has('patient')) {
@@ -402,13 +864,194 @@ function navigateTo(targetId) {
     }
 }
 
+// Loads and monitors Patient Portal (called when a patient logs in)
+async function startPatientPortal(patientProfile) {
+    const { doc, onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js");
+    const { db } = await import("./firebase-config.js");
+    
+    // 1. Listen to real-time changes in patient profile
+    const docRef = doc(db, "patients", patientProfile.uid);
+    patientProfileUnsubscribe = onSnapshot(docRef, async (docSnap) => {
+        if (!docSnap.exists()) return;
+        const data = docSnap.data();
+        
+        document.getElementById('portal-pat-name').textContent = data.name;
+        document.getElementById('portal-pat-id').textContent = `#${data.patientId}`;
+        document.getElementById('portal-pat-dob').textContent = data.dob;
+        document.getElementById('portal-pat-blood').textContent = data.bloodType;
+        document.getElementById('portal-pat-allergies').textContent = data.allergies || 'Ninguna';
+        
+        document.getElementById('portal-pat-specialty').textContent = data.specialty || 'General';
+        document.getElementById('portal-pat-doctor').textContent = data.primaryDoctorName || 'Sin Asignar';
+        
+        document.getElementById('portal-pat-hr').innerHTML = `${data.heartRate || '--'} <span>lpm</span>`;
+        document.getElementById('portal-pat-bp').innerHTML = `${data.bloodPressure || '--/--'} <span>mmHg</span>`;
+        document.getElementById('portal-pat-temp').innerHTML = `${data.temp || '--'} <span>°C</span>`;
+        
+        // Priority Control to Lock/Unlock Patient Messaging
+        const isPriority = data.isPriority || false;
+        const lockedAlert = document.getElementById('portal-chat-locked-alert');
+        const inputText = document.getElementById('portal-chat-input-text');
+        const submitBtn = document.getElementById('portal-chat-submit-btn');
+        
+        if (isPriority) {
+            lockedAlert.style.display = 'none';
+            inputText.disabled = false;
+            submitBtn.disabled = false;
+            inputText.placeholder = "Escribe tu mensaje para el equipo médico...";
+        } else {
+            lockedAlert.style.display = 'block';
+            inputText.disabled = true;
+            submitBtn.disabled = true;
+            inputText.placeholder = "Chat bloqueado (No Prioritario)";
+        }
+        
+        await renderPatientPortalNotes(patientProfile.uid);
+    });
+    
+    // 2. Real-time patient messages listener
+    if (currentChatUnsubscribe) currentChatUnsubscribe();
+    currentChatUnsubscribe = listenChatMessages(patientProfile.patientId, (messages) => {
+        renderPatientChat(messages);
+    });
+    
+    // 3. Chat form handler
+    const chatForm = document.getElementById('portal-chat-send-form');
+    chatForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const chatInput = document.getElementById('portal-chat-input-text');
+        const text = chatInput.value.trim();
+        if (!text) return;
+        
+        await sendChatMessage(patientProfile.patientId, patientProfile.uid, patientProfile.name, 'patient', text);
+        chatInput.value = '';
+    };
+
+    // 4. Emergency Call Button inside Patient Portal
+    const callBtn = document.getElementById('btn-patient-emergency-call');
+    const navCallBtn = document.getElementById('nav-btn-call-doctor');
+    
+    const triggerCall = () => {
+        const specialty = patientProfile.specialty || 'General';
+        const modal = document.getElementById('simulated-call-modal');
+        document.getElementById('call-specialty-name').textContent = specialty.toUpperCase();
+        modal.style.display = 'flex';
+        
+        playRingingTone();
+        
+        // Trigger high-priority clinical alert to the target department
+        sendEmergencyAlert({
+            patientId: patientProfile.uid,
+            patientName: patientProfile.name,
+            procedure: "LLAMADA DE EMERGENCIA EN CAMA",
+            medications: "El paciente ha activado el botón de emergencia en su Portal.",
+            authorizedBy: "Auto-Llamado Paciente",
+            specialty: specialty
+        });
+        
+        document.getElementById('btn-cancel-call').onclick = () => {
+            stopRingingTone();
+            modal.style.display = 'none';
+        };
+    };
+    
+    if (callBtn) callBtn.onclick = triggerCall;
+    if (navCallBtn) navCallBtn.onclick = triggerCall;
+}
+
+async function renderPatientPortalNotes(patientDocId) {
+    const container = document.getElementById('portal-notes-container');
+    if (!container) return;
+    
+    const notes = await getPatientNotes(patientDocId);
+    
+    if (notes.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center" style="padding: 20px;">No hay notas clínicas registradas.</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    notes.forEach(note => {
+        let dateStr = "Justo ahora";
+        if (note.timestamp) {
+            const date = note.timestamp.toDate();
+            dateStr = date.toLocaleDateString('es-ES', { month: 'short', day: 'numeric', year: 'numeric' }) + ' - ' + date.toLocaleTimeString('es-ES', { hour: '2-digit', minute:'2-digit' });
+        }
+        
+        const noteEl = document.createElement('div');
+        noteEl.className = 'note-item';
+        
+        let specDetails = "";
+        if (note.specialtyData) {
+            for (const [key, val] of Object.entries(note.specialtyData)) {
+                if (val) specDetails += `<span class="badge" style="background:#f1f5f9; color:var(--text-muted); font-size:0.65rem; margin-right:5px;">${key}: ${val}</span>`;
+            }
+        }
+        
+        noteEl.innerHTML = `
+            <div class="note-meta">
+                <span>${dateStr}</span>
+                <span class="badge badge-primary">${note.specialty || 'General'}</span>
+            </div>
+            <div class="note-content">
+                <strong style="color:var(--primary)">DIAGNÓSTICO: ${note.diagnosis || '--'}</strong>
+                <p style="margin:8px 0"><strong>Indicaciones de Tratamiento:</strong> ${note.plan || '--'}</p>
+                <div style="font-size: 0.72rem; color: var(--text-muted); border-top: 1px dashed var(--border-color); padding-top: 8px; margin-top: 8px;">
+                    Atendido por: <strong>Dr. ${note.doctorName}</strong> en Turno ${note.doctorShift || 'Matutino'}
+                </div>
+                <div style="margin-top:10px;">${specDetails}</div>
+            </div>
+        `;
+        container.appendChild(noteEl);
+    });
+}
+
+function renderPatientChat(messages) {
+    const display = document.getElementById('portal-chat-messages-display');
+    if (!display) return;
+    
+    display.innerHTML = '';
+    if (messages.length === 0) {
+        display.innerHTML = '<p class="text-muted text-center" style="padding: 15px; font-size: 0.8rem;">No hay mensajes en este canal. Escribe tu duda o consulta.</p>';
+        return;
+    }
+    
+    messages.forEach(msg => {
+        const msgEl = document.createElement('div');
+        const isDoctor = msg.senderRole === 'doctor';
+        
+        msgEl.style.cssText = `
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            line-height: 1.4;
+            margin-bottom: 8px;
+            ${!isDoctor 
+                ? 'align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px;' 
+                : 'align-self: flex-start; background: #e2e8f0; color: var(--text-main); border-bottom-left-radius: 2px;'
+            }
+        `;
+        
+        msgEl.innerHTML = `
+            <strong style="display:block; font-size:0.68rem; margin-bottom:3px; ${!isDoctor ? 'color:#bfdbfe' : 'color:var(--text-muted)'}">
+                ${isDoctor ? 'Equipo Médico' : 'Tú'}
+            </strong>
+            <span>${msg.text}</span>
+        `;
+        display.appendChild(msgEl);
+    });
+    
+    display.scrollTop = display.scrollHeight;
+}
+
+// Fetch Patient Details inside Doctor View
 async function loadPatientDetails(patientIdStr, docId = null) {
     noPatientView.style.display = 'none';
     patientDataView.style.display = 'none';
     
     let patientData = null;
     if (docId) {
-        // Find by doc reference if we have it
         patientData = await getPatientDataByDocId(docId); 
     } else {
         patientData = await getPatientData(patientIdStr);
@@ -417,7 +1060,6 @@ async function loadPatientDetails(patientIdStr, docId = null) {
     if (patientData) {
         currentPatientDocId = patientData.id;
         
-        // Populate UI
         document.getElementById('pat-name').textContent = patientData.name;
         document.getElementById('pat-id').textContent = `#${patientData.patientId}`;
         document.getElementById('pat-dob').textContent = patientData.dob;
@@ -427,10 +1069,97 @@ async function loadPatientDetails(patientIdStr, docId = null) {
         document.getElementById('pat-bp').innerHTML = `${patientData.bloodPressure || '--/--'} <span>mmHg</span>`;
         document.getElementById('pat-temp').innerHTML = `${patientData.temp || '--'} <span>°C</span>`;
         
+        // Render proprietary team detail card
+        document.getElementById('pat-specialty').textContent = patientData.specialty || 'General';
+        document.getElementById('pat-primary-doc').textContent = patientData.primaryDoctorName || 'Sin Asignar';
+        
+        // Show collaborative doctors list
+        const secDocsEl = document.getElementById('pat-secondary-docs');
+        if (secDocsEl) {
+            if (patientData.secondaryDoctors && patientData.secondaryDoctors.length > 0) {
+                const doctorsList = await getAllDoctors();
+                const matchedNames = patientData.secondaryDoctors.map(uid => {
+                    const found = doctorsList.find(d => d.id === uid);
+                    return found ? `Dr. ${found.name}` : null;
+                }).filter(Boolean);
+                secDocsEl.textContent = matchedNames.join(', ') || 'Ninguno';
+            } else {
+                secDocsEl.textContent = 'Ninguno';
+            }
+        }
+        
+        const lastModEl = document.getElementById('pat-last-mod');
+        if (lastModEl) {
+            let lastModStr = "Por: Sistema";
+            if (patientData.lastModifiedAt) {
+                const modDate = patientData.lastModifiedAt.toDate();
+                lastModStr = `Por: ${patientData.lastModifiedBy || 'Sistema'} el ${modDate.toLocaleDateString('es-ES')} a las ${modDate.toLocaleTimeString('es-ES', {hour: '2-digit', minute:'2-digit'})}`;
+            }
+            lastModEl.textContent = lastModStr;
+        }
+
         patientDataView.style.display = 'block';
         await renderPatientNotes(currentPatientDocId);
+        await renderAuditLogs(currentPatientDocId);
 
-        // Update browser URL query parameter with the patient ID dynamically
+        // Security log audit
+        const doctorProfile = getCurrentProfile();
+        if (doctorProfile) {
+            await addAuditLog(patientData.id, "consult", doctorProfile);
+        }
+
+        // Signature consent display
+        const consentArea = document.getElementById('consent-signature-area');
+        const viewSigBtn = document.getElementById('btn-view-signature');
+        if (consentArea && viewSigBtn) {
+            if (patientData.signatureUrl) {
+                consentArea.style.display = 'flex';
+                viewSigBtn.onclick = () => {
+                    const sigModal = document.getElementById('signature-modal');
+                    const sigPreview = document.getElementById('signature-img-preview');
+                    if (sigModal && sigPreview) {
+                        sigPreview.src = patientData.signatureUrl;
+                        sigModal.classList.add('active');
+                    }
+                };
+            } else {
+                consentArea.style.display = 'none';
+            }
+        }
+
+        // Live Chat Panel setup for Doctors
+        const chatSectionCard = document.getElementById('chat-section-card');
+        const patPriorityCheckbox = document.getElementById('pat-priority-checkbox');
+        
+        if (chatSectionCard) {
+            chatSectionCard.style.display = 'block';
+            if (currentChatUnsubscribe) currentChatUnsubscribe();
+            currentChatUnsubscribe = listenChatMessages(patientData.patientId, (messages) => {
+                renderDoctorChat(messages, patientData.patientId);
+            });
+            
+            const chatSendForm = document.getElementById('chat-send-form');
+            chatSendForm.onsubmit = async (e) => {
+                e.preventDefault();
+                const chatInput = document.getElementById('chat-input-text');
+                const text = chatInput.value.trim();
+                if (!text) return;
+                
+                const profile = getCurrentProfile();
+                await sendChatMessage(patientData.patientId, profile.uid, profile.name, 'doctor', text);
+                chatInput.value = '';
+            };
+        }
+        
+        if (patPriorityCheckbox) {
+            patPriorityCheckbox.checked = patientData.isPriority || false;
+            patPriorityCheckbox.onchange = async () => {
+                const checked = patPriorityCheckbox.checked;
+                await updatePatient(patientData.id, { isPriority: checked });
+                showToast(checked ? "Paciente marcado como Prioritario. Chat habilitado." : "Prioridad removida. Chat deshabilitado.", "info");
+            };
+        }
+
         const newUrl = new URL(window.location.href);
         if (newUrl.searchParams.get('patient') !== patientData.patientId) {
             newUrl.searchParams.set('patient', patientData.patientId);
@@ -446,7 +1175,6 @@ async function loadPatientDetails(patientIdStr, docId = null) {
     }
 }
 
-// Added missing helper to database.js context (conceptually)
 async function getPatientDataByDocId(docId) {
     const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js");
     const { db } = await import("./firebase-config.js");
@@ -457,10 +1185,8 @@ async function getPatientDataByDocId(docId) {
 
 async function renderPatientNotes(patientDocId) {
     notesContainer.innerHTML = '<div class="loading-spinner">Cargando historial...</div>';
-    
     const profile = getCurrentProfile();
     const isAdmin = profile && profile.role === 'admin';
-    
     const notes = await getPatientNotes(patientDocId);
     
     if (notes.length === 0) {
@@ -479,7 +1205,6 @@ async function renderPatientNotes(patientDocId) {
         const noteEl = document.createElement('div');
         noteEl.className = 'note-item';
         
-        // Create specialty details string
         let specDetails = "";
         if (note.specialtyData) {
             for (const [key, val] of Object.entries(note.specialtyData)) {
@@ -487,10 +1212,24 @@ async function renderPatientNotes(patientDocId) {
             }
         }
 
+        let triageTag = "";
+        if (note.triageLevel && note.triageLevel !== 'no_eval') {
+            const colors = {
+                red: '#ef4444',
+                orange: '#f97316',
+                yellow: '#eab308',
+                green: '#22c55e',
+                blue: '#3b82f6'
+            };
+            const color = colors[note.triageLevel] || '#64748b';
+            triageTag = `<span class="badge" style="background:${color}; color:white; font-size:0.65rem; margin-right:5px; font-weight:bold; text-transform:uppercase;">TRIAGE: ${note.triageLabel || 'Evaluado'}</span>`;
+        }
+
         noteEl.innerHTML = `
             <div class="note-meta">
                 <span>${dateStr}</span>
                 <div>
+                    ${triageTag}
                     <span class="badge badge-primary">${note.specialty || 'Gral'}</span>
                     <button class="btn-icon-sm" onclick="window.editNote('${note.id}')" title="Editar"><i class="fa-solid fa-pen"></i></button>
                     ${isAdmin ? `<button class="btn-icon-sm text-danger" onclick="window.deleteNote('${note.id}')" title="Eliminar"><i class="fa-solid fa-trash"></i></button>` : ''}
@@ -514,16 +1253,57 @@ async function renderPatientNotes(patientDocId) {
     });
 }
 
-// Exposed Functions for Note Actions
+function renderDoctorChat(messages, patientId) {
+    const display = document.getElementById('chat-messages-display');
+    if (!display) return;
+    
+    display.innerHTML = '';
+    if (messages.length === 0) {
+        display.innerHTML = '<p class="text-muted text-center" style="padding: 10px; font-size: 0.72rem;">No hay mensajes en este canal clínico.</p>';
+        return;
+    }
+    
+    messages.forEach(msg => {
+        const msgEl = document.createElement('div');
+        const isDoctor = msg.senderRole === 'doctor';
+        
+        msgEl.style.cssText = `
+            max-width: 80%;
+            padding: 8px 12px;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            line-height: 1.4;
+            margin-bottom: 5px;
+            ${isDoctor 
+                ? 'align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px;' 
+                : 'align-self: flex-start; background: #e2e8f0; color: var(--text-main); border-bottom-left-radius: 2px;'
+            }
+        `;
+        
+        msgEl.innerHTML = `
+            <strong style="display:block; font-size:0.65rem; margin-bottom:2px; ${isDoctor ? 'color:#bfdbfe' : 'color:var(--text-muted)'}">
+                ${msg.senderName} (${isDoctor ? 'Médico' : 'Paciente'})
+            </strong>
+            <span>${msg.text}</span>
+        `;
+        display.appendChild(msgEl);
+    });
+    
+    display.scrollTop = display.scrollHeight;
+}
+
+// Exposed Functions for Note Actions (with NOM-024 validation)
 window.editNote = async (noteId) => {
     const notes = await getPatientNotes(currentPatientDocId);
     const note = notes.find(n => n.id === noteId);
     if (!note) return;
 
+    const profile = getCurrentProfile();
+    if (!profile) return;
+
     editingNoteId = noteId;
     renderSpecialtyFields();
     
-    // Fill basic fields
     document.getElementById('note-subjective').value = note.subjective || "";
     document.getElementById('note-diagnosis').value = note.diagnosis || "";
     document.getElementById('note-plan').value = note.plan || "";
@@ -532,7 +1312,22 @@ window.editNote = async (noteId) => {
     document.getElementById('note-temp').value = note.temp || "";
     document.getElementById('note-spo2').value = note.spo2 || "";
 
-    // Fill specialty fields
+    // Clear override panel
+    const overridePanel = document.getElementById('shift-override-panel');
+    overridePanel.style.display = 'none';
+    document.getElementById('override-justification-input').value = '';
+
+    // NOM-024 shift override check: 
+    // Author or co-médico on SAME shift & specialty do NOT need authorization. Otherwise, lock input and require shift justification.
+    const isAuthor = note.doctorId === profile.uid;
+    const isSameShiftAndDept = note.specialty === profile.department && (note.doctorShift || "matutino") === (profile.shift || "matutino");
+    
+    if (!isAuthor && !isSameShiftAndDept) {
+        overridePanel.style.display = 'block';
+        document.getElementById('override-note-author').textContent = note.doctorName || 'Médico';
+        document.getElementById('override-note-shift').textContent = note.doctorShift || 'Matutino';
+    }
+
     setTimeout(() => {
         const specInputs = document.querySelectorAll('.spec-input');
         specInputs.forEach(input => {
@@ -584,18 +1379,18 @@ async function loadAdminData() {
     });
 }
 
+// Loads Patient Directory based on Doctor Specialty
 async function loadPatientDirectory() {
     if (!patientsTableBody) return;
     patientsTableBody.innerHTML = '<tr><td colspan="4">Cargando pacientes...</td></tr>';
     
     const profile = getCurrentProfile();
     const isAdmin = profile && profile.role === 'admin';
-    
-    const patients = await getAllPatients();
+    const patients = await getAllPatients(profile);
     patientsTableBody.innerHTML = '';
     
     if (patients.length === 0) {
-        patientsTableBody.innerHTML = '<tr><td colspan="4" class="text-center">No hay pacientes registrados.</td></tr>';
+        patientsTableBody.innerHTML = '<tr><td colspan="4" class="text-center">No hay pacientes registrados en tu departamento.</td></tr>';
         return;
     }
 
@@ -619,7 +1414,6 @@ async function loadPatientDirectory() {
     });
 }
 
-// Expose Patient Directory Actions
 window.editPatient = async (docId) => {
     const patients = await getAllPatients();
     const pat = patients.find(p => p.id === docId);
@@ -633,7 +1427,18 @@ window.editPatient = async (docId) => {
     document.getElementById('reg-blood').value = pat.bloodType;
     document.getElementById('reg-allergies').value = pat.allergies || "";
 
+    const regSpecialty = document.getElementById('reg-specialty');
+    const regPrimaryDoc = document.getElementById('reg-primary-doc');
+    if (regSpecialty && regPrimaryDoc) {
+        regSpecialty.value = pat.specialty || "Cardiología";
+        await populatePrimaryDoctorsSelect(regSpecialty.value, regPrimaryDoc, pat.primaryDoctorId);
+    }
+
     registerModal.classList.add('active');
+    setTimeout(() => {
+        if (window.resizeSignatureCanvas) window.resizeSignatureCanvas();
+        if (window.loadSignatureDataUrl) window.loadSignatureDataUrl(pat.signatureUrl || "");
+    }, 200);
 };
 
 window.deletePatient = async (docId) => {
@@ -649,29 +1454,27 @@ window.deletePatient = async (docId) => {
     }
 };
 
-// Expose to global for onclick
 window.viewPatient = (id) => {
     navigateTo('records-section');
     loadPatientDetails(id);
 };
 
 async function loadDashboardStats() {
-    const patients = await getAllPatients();
+    const profile = getCurrentProfile();
+    const patients = await getAllPatients(profile);
     document.getElementById('stat-patients').textContent = patients.length;
-    document.getElementById('stat-evals').textContent = Math.floor(Math.random() * 20) + 5; 
+    document.getElementById('stat-evals').textContent = Math.floor(Math.random() * 15) + 3; 
     loadRecentActivity(patients);
 }
 
 async function loadRecentActivity(patients) {
     const container = document.getElementById('recent-activity-list');
     if (!container) return;
-    
-    // Simulate/Fetch some recent activity
     container.innerHTML = '';
     const recent = patients.slice(0, 4);
     
     if (recent.length === 0) {
-        container.innerHTML = '<p class="text-muted" style="font-size:0.8rem;">No hay actividad reciente.</p>';
+        container.innerHTML = '<p class="text-muted" style="font-size:0.8rem;">No hay actividad reciente en tu área.</p>';
         return;
     }
 
@@ -682,7 +1485,7 @@ async function loadRecentActivity(patients) {
             <div style="font-size:1rem; color:var(--primary)"><i class="fa-solid fa-user-check"></i></div>
             <div style="flex:1">
                 <p style="font-size:0.8rem; font-weight:600; margin:0;">${p.name}</p>
-                <p style="font-size:0.7rem; color:var(--text-muted); margin:0;">Ingreso/Actualización registrada</p>
+                <p style="font-size:0.7rem; color:var(--text-muted); margin:0;">Registro de especialidad activo</p>
             </div>
             <div style="font-size:0.65rem; color:var(--text-muted)">Hoy</div>
         `;
@@ -720,6 +1523,12 @@ function renderSpecialtyFields() {
         fields = [
             { id: 'glasgow', label: 'Escala Glasgow', placeholder: '/15' },
             { id: 'triage', label: 'Nivel Triage', placeholder: '1-5' }
+        ];
+    } else if (profile.department === 'Neurología') {
+        fields = [
+            { id: 'reflexes', label: 'Reflejos Motores', placeholder: 'Normal/Disminuido' },
+            { id: 'pupils', label: 'Reflejo Pupilar', placeholder: 'Isocóricas/Anisocóricas' },
+            { id: 'coordination', label: 'Coordinación', placeholder: 'Estable/Inestable' }
         ];
     }
 
@@ -775,3 +1584,266 @@ function showToast(message, type = 'success') {
     }, 4000);
 }
 
+function calculateTriageManchester() {
+    const hrVal = parseInt(document.getElementById('note-hr').value) || 0;
+    const bpVal = document.getElementById('note-bp').value || "";
+    const tempVal = parseFloat(document.getElementById('note-temp').value) || 0;
+    const spo2Val = parseInt(document.getElementById('note-spo2').value) || 0;
+    
+    let level = 'no_eval';
+    let label = 'Sin Evaluar';
+    let color = '#64748b';
+    
+    let systolic = 0;
+    if (bpVal && bpVal.includes('/')) {
+        systolic = parseInt(bpVal.split('/')[0]) || 0;
+    }
+
+    if (spo2Val > 0 || hrVal > 0 || tempVal > 0 || systolic > 0) {
+        if ((spo2Val > 0 && spo2Val < 90) || hrVal > 140 || (hrVal > 0 && hrVal < 40) || (systolic > 0 && (systolic > 200 || systolic < 80))) {
+            level = 'red';
+            label = 'Rojo (Resucitación)';
+            color = '#ef4444';
+        } else if ((spo2Val >= 90 && spo2Val <= 93) || tempVal >= 39.0 || (tempVal > 0 && tempVal <= 35.0)) {
+            level = 'orange';
+            label = 'Naranja (Emergencia)';
+            color = '#f97316';
+        } else if ((spo2Val >= 94 && spo2Val <= 95) || (hrVal >= 100 && hrVal <= 139) || tempVal >= 37.8) {
+            level = 'yellow';
+            label = 'Amarillo (Urgente)';
+            color = '#eab308';
+        } else if ((spo2Val >= 96) || (hrVal >= 50 && hrVal <= 99) || (tempVal > 35.0 && tempVal < 37.8)) {
+            level = 'green';
+            label = 'Verde (Urgencia Menor)';
+            color = '#22c55e';
+        } else {
+            level = 'blue';
+            label = 'Azul (No Urgente)';
+            color = '#3b82f6';
+        }
+    }
+
+    const badge = document.getElementById('triage-suggested-badge');
+    if (badge) {
+        badge.textContent = label.toUpperCase();
+        badge.style.backgroundColor = color;
+        badge.style.color = '#ffffff';
+        badge.setAttribute('data-triage-level', level);
+    }
+}
+
+function exportPatientToFHIR(patientData, notes = []) {
+    if (!patientData) return;
+
+    const fhirPatient = {
+        resourceType: "Patient",
+        id: patientData.patientId || "anonymous",
+        active: true,
+        name: [
+            {
+                use: "official",
+                text: patientData.name || "Paciente Anónimo"
+            }
+        ],
+        birthDate: patientData.dob || "",
+        extension: []
+    };
+
+    if (patientData.bloodType) {
+        fhirPatient.extension.push({
+            url: "http://hl7.org/fhir/StructureDefinition/patient-bloodType",
+            valueCodeableConcept: {
+                coding: [
+                    {
+                        system: "http://snomed.info/sct",
+                        code: "112144000",
+                        display: `Grupo Sanguíneo: ${patientData.bloodType}`
+                    }
+                ]
+            }
+        });
+    }
+
+    const fhirAllergies = [];
+    if (patientData.allergies && patientData.allergies !== "Ninguna") {
+        patientData.allergies.split(',').forEach((allergy, i) => {
+            fhirAllergies.push({
+                resourceType: "AllergyIntolerance",
+                id: `allergy-${i}`,
+                clinicalStatus: {
+                    coding: [
+                        {
+                            system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+                            code: "active"
+                        }
+                    ]
+                },
+                verificationStatus: {
+                    coding: [
+                        {
+                            system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                            code: "confirmed"
+                        }
+                    ]
+                },
+                category: ["biological"],
+                criticality: "high",
+                code: {
+                    text: allergy.trim()
+                },
+                patient: {
+                    reference: `Patient/${fhirPatient.id}`
+                }
+            });
+        });
+    }
+
+    const fhirObservations = [];
+    if (patientData.heartRate && patientData.heartRate !== "--") {
+        fhirObservations.push({
+            resourceType: "Observation",
+            id: "obs-heart-rate",
+            status: "final",
+            category: [
+                {
+                    coding: [
+                        {
+                            system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                            code: "vital-signs",
+                            display: "Vital Signs"
+                        }
+                    ]
+                }
+            ],
+            code: {
+                coding: [
+                    {
+                        system: "http://loinc.org",
+                        code: "8867-4",
+                        display: "Heart rate"
+                    }
+                ]
+            },
+            subject: {
+                reference: `Patient/${fhirPatient.id}`
+            },
+            effectiveDateTime: new Date().toISOString(),
+            valueQuantity: {
+                value: parseFloat(patientData.heartRate),
+                unit: "beats/minute",
+                system: "http://unitsofmeasure.org",
+                code: "/min"
+            }
+        });
+    }
+
+    if (patientData.temp && patientData.temp !== "--") {
+        fhirObservations.push({
+            resourceType: "Observation",
+            id: "obs-body-temp",
+            status: "final",
+            category: [
+                {
+                    coding: [
+                        {
+                            system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                            code: "vital-signs",
+                            display: "Vital Signs"
+                        }
+                    ]
+                }
+            ],
+            code: {
+                coding: [
+                    {
+                        system: "http://loinc.org",
+                        code: "8310-5",
+                        display: "Body temperature"
+                    }
+                ]
+            },
+            subject: {
+                reference: `Patient/${fhirPatient.id}`
+            },
+            effectiveDateTime: new Date().toISOString(),
+            valueQuantity: {
+                value: parseFloat(patientData.temp),
+                unit: "C",
+                system: "http://unitsofmeasure.org",
+                code: "Cel"
+            }
+        });
+    }
+
+    const fhirBundle = {
+        resourceType: "Bundle",
+        type: "collection",
+        timestamp: new Date().toISOString(),
+        entry: [
+            { resource: fhirPatient },
+            ...fhirAllergies.map(r => ({ resource: r })),
+            ...fhirObservations.map(r => ({ resource: r }))
+        ]
+    };
+
+    const jsonString = JSON.stringify(fhirBundle, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `FHIR_Patient_${patientData.patientId || 'unknown'}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Expediente exportado en formato FHIR HL7 JSON", "success");
+}
+
+async function renderAuditLogs(patientDocId) {
+    const container = document.getElementById('audit-logs-container');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading-spinner">Cargando bitácora...</div>';
+    const logs = await getAuditLogs(patientDocId);
+    
+    if (logs.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center" style="padding: 20px; font-size: 0.8rem;">No hay registros de acceso en la bitácora.</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    logs.forEach(log => {
+        let dateStr = "Justo ahora";
+        if (log.timestamp) {
+            const date = log.timestamp.toDate();
+            dateStr = date.toLocaleDateString('es-ES', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + date.toLocaleTimeString('es-ES', { hour: '2-digit', minute:'2-digit', second:'2-digit' });
+        }
+        
+        const item = document.createElement('div');
+        item.style.cssText = "padding: 8px 12px; margin-bottom: 8px; background: white; border-radius: 6px; border: 1px solid var(--border-color); font-size: 0.72rem; display: flex; align-items: flex-start; gap: 8px;";
+        
+        let icon = '<i class="fa-solid fa-eye" style="color: #64748b; margin-top: 2px;"></i>';
+        let actionText = "consultó el expediente";
+        
+        if (log.action.includes("justification:")) {
+            icon = '<i class="fa-solid fa-triangle-exclamation" style="color: #eab308; margin-top: 2px;"></i>';
+            actionText = `activó protocolo NOM-024: "${log.action.split('justification: ')[1]}"`;
+        } else if (log.action === "edit") {
+            icon = '<i class="fa-solid fa-user-pen" style="color: #f97316; margin-top: 2px;"></i>';
+            actionText = "modificó el expediente";
+        } else if (log.action === "create") {
+            icon = '<i class="fa-solid fa-user-plus" style="color: #22c55e; margin-top: 2px;"></i>';
+            actionText = "creó el expediente";
+        }
+        
+        item.innerHTML = `
+            ${icon}
+            <div style="flex:1">
+                <p style="margin: 0; font-weight: 600; color: var(--text-main); font-size: 0.7rem;">Dr. ${log.doctorName?.toUpperCase()} (${log.doctorDept})</p>
+                <p style="margin: 2px 0 0 0; color: var(--text-muted); font-size: 0.65rem;">${actionText}</p>
+            </div>
+            <div style="color: var(--text-muted); font-size: 0.65rem; white-space: nowrap;">${dateStr}</div>
+        `;
+        container.appendChild(item);
+    });
+}

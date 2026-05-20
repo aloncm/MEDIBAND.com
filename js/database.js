@@ -9,7 +9,10 @@ import {
     orderBy, 
     addDoc, 
     serverTimestamp,
-    setDoc
+    setDoc,
+    updateDoc,
+    arrayUnion,
+    onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
 
 // Fetch User Profile (Doctor/Admin)
@@ -44,10 +47,17 @@ export async function createPatient(data) {
     try {
         await addDoc(collection(db, "patients"), {
             ...data,
+            specialty: data.specialty || "Médico General",
+            primaryDoctorId: data.primaryDoctorId || "",
+            primaryDoctorName: data.primaryDoctorName || "Sin Asignar",
+            secondaryDoctors: data.secondaryDoctors || [],
+            isPriority: data.isPriority || false,
             heartRate: "--",
             bloodPressure: "--/--",
             temp: "--",
-            createdAt: serverTimestamp()
+            createdAt: serverTimestamp(),
+            lastModifiedAt: serverTimestamp(),
+            lastModifiedBy: data.lastModifiedBy || "Sistema"
         });
         return true;
     } catch (error) {
@@ -75,13 +85,21 @@ export async function getPatientData(patientId) {
 }
 
 // Fetch All Patients (For Directory)
-export async function getAllPatients() {
+export async function getAllPatients(doctorProfile = null) {
     try {
         const q = query(collection(db, "patients"), orderBy("name", "asc"));
         const querySnapshot = await getDocs(q);
         const patients = [];
         querySnapshot.forEach((doc) => {
-            patients.push({ id: doc.id, ...doc.data() });
+            const data = doc.data();
+            // Filter by specialty if doctorProfile is a doctor and not admin
+            if (doctorProfile && doctorProfile.role === "doctor" && doctorProfile.department) {
+                if (data.specialty === doctorProfile.department) {
+                    patients.push({ id: doc.id, ...data });
+                }
+            } else {
+                patients.push({ id: doc.id, ...data });
+            }
         });
         return patients;
     } catch (error) {
@@ -123,6 +141,7 @@ export async function addClinicalNote(patientDocId, doctorProfile, noteData) {
             doctorId: doctorProfile.uid || "",
             doctorName: doctorProfile.name,
             specialty: doctorProfile.department,
+            doctorShift: doctorProfile.shift || "matutino",
             ...noteData,
             timestamp: serverTimestamp()
         });
@@ -132,7 +151,9 @@ export async function addClinicalNote(patientDocId, doctorProfile, noteData) {
         await setDoc(patientRef, {
             heartRate: noteData.hr || "--",
             bloodPressure: noteData.bp || "--/--",
-            temp: noteData.temp || "--"
+            temp: noteData.temp || "--",
+            lastModifiedAt: serverTimestamp(),
+            lastModifiedBy: doctorProfile.name
         }, { merge: true });
 
         return true;
@@ -209,8 +230,38 @@ export async function getAllDoctors() {
 // Seed Initial Data (Helper function to setup the DB)
 export async function seedDummyData() {
     try {
-        // Only run this manually if DB is empty
         const patientsRef = collection(db, "patients");
+        const usersRef = collection(db, "users");
+        
+        // Seed Doctors
+        const d1 = query(usersRef, where("email", "==", "cardio.matutino@mediband.com"));
+        const snapshotD1 = await getDocs(d1);
+        if (snapshotD1.empty) {
+            await setDoc(doc(db, "users", "doc-cardio-mat"), {
+                name: "Ramírez (Cardio-Mat)",
+                email: "cardio.matutino@mediband.com",
+                role: "doctor",
+                department: "Cardiología",
+                shift: "matutino"
+            });
+            await setDoc(doc(db, "users", "doc-cardio-noc"), {
+                name: "García (Cardio-Noc)",
+                email: "cardio.nocturno@mediband.com",
+                role: "doctor",
+                department: "Cardiología",
+                shift: "nocturno"
+            });
+            await setDoc(doc(db, "users", "doc-neuro-mat"), {
+                name: "Martínez (Neuro-Mat)",
+                email: "neuro.matutino@mediband.com",
+                role: "doctor",
+                department: "Neurología",
+                shift: "matutino"
+            });
+            console.log("Mock doctors seeded.");
+        }
+
+        // Seed Patient
         const p1 = query(patientsRef, where("patientId", "==", "MB-99201-X"));
         const snapshot = await getDocs(p1);
         
@@ -219,13 +270,21 @@ export async function seedDummyData() {
                 patientId: "MB-99201-X",
                 name: "James R. Thompson",
                 dob: "1952-05-14",
-                bloodType: "O Positive (O+)",
+                bloodType: "O+",
                 height: "182 cm",
                 weight: "84.5 kg",
-                allergies: "Penicillin, Latex, Peanuts",
+                allergies: "Penicillin, Latex",
                 heartRate: "78",
                 bloodPressure: "120/80",
-                temp: "36.7"
+                temp: "36.7",
+                specialty: "Cardiología",
+                primaryDoctorId: "doc-cardio-mat",
+                primaryDoctorName: "Ramírez (Cardio-Mat)",
+                secondaryDoctors: ["doc-cardio-noc"],
+                isPriority: true,
+                createdAt: serverTimestamp(),
+                lastModifiedAt: serverTimestamp(),
+                lastModifiedBy: "Sistema"
             });
             console.log("Dummy patient seeded.");
         }
@@ -233,3 +292,135 @@ export async function seedDummyData() {
         console.error("Error seeding dummy data", error);
     }
 }
+
+// Add Audit Log Entry (NOM-024)
+export async function addAuditLog(patientDocId, action, doctorProfile) {
+    try {
+        if (!patientDocId || !doctorProfile) return false;
+        await addDoc(collection(db, "audit_logs"), {
+            patientDocId: patientDocId,
+            doctorId: doctorProfile.uid || "",
+            doctorName: doctorProfile.name || "Médico",
+            doctorEmail: doctorProfile.email || "",
+            doctorDept: doctorProfile.department || "General",
+            action: action, // "consult", "edit", "create"
+            timestamp: serverTimestamp()
+        });
+        return true;
+    } catch (error) {
+        console.error("Error adding audit log:", error);
+        return false;
+    }
+}
+
+// Get Audit Logs for a Patient (NOM-024)
+export async function getAuditLogs(patientDocId) {
+    try {
+        const q = query(
+            collection(db, "audit_logs"),
+            where("patientDocId", "==", patientDocId)
+        );
+        const querySnapshot = await getDocs(q);
+        const logs = [];
+        querySnapshot.forEach((doc) => {
+            logs.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // Sort in memory by timestamp descending
+        return logs.sort((a, b) => {
+            const timeA = a.timestamp?.seconds || 0;
+            const timeB = b.timestamp?.seconds || 0;
+            return timeB - timeA;
+        });
+    } catch (error) {
+        console.error("Error fetching audit logs:", error);
+        return [];
+    }
+}
+
+// Send Emergency Alert
+export async function sendEmergencyAlert(alertData) {
+    try {
+        await addDoc(collection(db, "emergency_alerts"), {
+            ...alertData,
+            timestamp: serverTimestamp(),
+            confirmedBy: [] // Array of doctor UIDs who confirmed reception
+        });
+        return true;
+    } catch (error) {
+        console.error("Error sending emergency alert:", error);
+        return false;
+    }
+}
+
+// Listen to Emergency Alerts in real-time
+export function listenEmergencyAlerts(specialty, callback) {
+    const q = query(
+        collection(db, "emergency_alerts"),
+        where("specialty", "==", specialty),
+        orderBy("timestamp", "desc")
+    );
+    
+    // Returns the unsubscribe function
+    return onSnapshot(q, (snapshot) => {
+        const alerts = [];
+        snapshot.forEach((doc) => {
+            alerts.push({ id: doc.id, ...doc.data() });
+        });
+        callback(alerts);
+    }, (error) => {
+        console.error("Error listening to alerts:", error);
+    });
+}
+
+// Confirm Emergency Alert Reception
+export async function confirmAlertReception(alertId, doctorUid) {
+    try {
+        const alertRef = doc(db, "emergency_alerts", alertId);
+        await updateDoc(alertRef, {
+            confirmedBy: arrayUnion(doctorUid)
+        });
+        return true;
+    } catch (error) {
+        console.error("Error confirming alert:", error);
+        return false;
+    }
+}
+
+// Send Chat Message
+export async function sendChatMessage(patientId, senderId, senderName, senderRole, text) {
+    try {
+        await addDoc(collection(db, "messages"), {
+            patientId,
+            senderId,
+            senderName,
+            senderRole,
+            text,
+            timestamp: serverTimestamp()
+        });
+        return true;
+    } catch (error) {
+        console.error("Error sending message:", error);
+        return false;
+    }
+}
+
+// Listen to Chat Messages in real-time
+export function listenChatMessages(patientId, callback) {
+    const q = query(
+        collection(db, "messages"),
+        where("patientId", "==", patientId),
+        orderBy("timestamp", "asc")
+    );
+    
+    return onSnapshot(q, (snapshot) => {
+        const messages = [];
+        snapshot.forEach((doc) => {
+            messages.push({ id: doc.id, ...doc.data() });
+        });
+        callback(messages);
+    }, (error) => {
+        console.error("Error listening to messages:", error);
+    });
+}
+

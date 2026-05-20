@@ -25,44 +25,71 @@
         <div class="login-container">
             <div class="login-header">
                 <div class="logo-icon"><img src="assets/logo.png" alt="MediBand Logo"></div>
-                <p>Sistema de Información Clínica Hospitalaria</p>
+                <p style="cursor: pointer;"><a href="#" id="login-privacy-link-header" style="color: var(--text-muted); text-decoration: underline; font-size: 0.9rem;"><i class="fa-solid fa-shield-halved"></i> Aviso de Privacidad</a></p>
             </div>
 
             <div class="login-card">
                 <h2>Inicio de Sesión Seguro</h2>
-                <p class="subtitle">Acceso exclusivo para personal autorizado.</p>
+                <p class="subtitle">Acceso exclusivo para personal y pacientes.</p>
+
+                <!-- Premium Login Selector -->
+                <div class="login-type-selector" style="display: flex; gap: 10px; margin-bottom: 25px; padding: 4px; background: var(--bg-color); border-radius: 10px; border: 1px solid var(--border-color);">
+                    <button type="button" class="btn-type-selector active" id="selector-doctor" style="flex: 1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s ease;"><i class="fa-solid fa-user-doctor"></i> Personal Médico</button>
+                    <button type="button" class="btn-type-selector" id="selector-patient" style="flex: 1; padding: 10px; border: none; border-radius: 8px; font-weight: 600; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s ease; background: transparent; color: var(--text-muted);"><i class="fa-solid fa-hospital-user"></i> Paciente NFC</button>
+                </div>
 
                 <form id="login-form">
-                    <div class="input-group">
-                        <label>ID DE EMPLEADO / CORREO</label>
-                        <div class="input-wrapper">
-                            <i class="fa-regular fa-user"></i>
-                            <input type="email" id="login-email" placeholder="ej. doctor@mediband.com" required>
+                    <!-- Doctor Login Fields -->
+                    <div id="doctor-login-fields">
+                        <div class="input-group">
+                            <label>CORREO ELECTRÓNICO</label>
+                            <div class="input-wrapper">
+                                <i class="fa-regular fa-user"></i>
+                                <input type="email" id="login-email" placeholder="ej. doctor@mediband.com">
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <label>CONTRASEÑA</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-lock"></i>
+                                <input type="password" id="login-password" placeholder="••••••••">
+                            </div>
                         </div>
                     </div>
 
-                    <div class="input-group">
-                        <label>CONTRASEÑA</label>
-                        <div class="input-wrapper">
-                            <i class="fa-solid fa-lock"></i>
-                            <input type="password" id="login-password" placeholder="••••••••" required>
+                    <!-- Patient Login Fields (Hidden by default) -->
+                    <div id="patient-login-fields" style="display: none;">
+                        <div class="input-group">
+                            <label>ID DE PULSERA (NFC)</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-id-card"></i>
+                                <input type="text" id="patient-login-id" placeholder="ej. MB-99201-X">
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <label>FECHA DE NACIMIENTO</label>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-calendar-days"></i>
+                                <input type="date" id="patient-login-dob" style="padding-left: 35px;">
+                            </div>
                         </div>
                     </div>
 
-                    <div class="security-notice">
+                    <div class="security-notice" style="margin-top: 15px;">
                         <i class="fa-solid fa-shield-halved"></i>
                         <p>Tus datos están protegidos mediante una conexión segura y cifrada.</p>
                     </div>
 
-                    <button type="submit" class="btn-primary" id="btn-login">
+                    <button type="submit" class="btn-primary" id="btn-login" style="margin-top: 20px;">
                         Entrar al Sistema <i class="fa-solid fa-arrow-right"></i>
                     </button>
                     <p id="login-error" class="error-msg"></p>
                 </form>
 
-                <div class="login-footer-card" style="cursor: pointer;">
-                    <a href="#" id="login-privacy-link" style="color: var(--text-muted); text-decoration: underline;"><i
-                            class=></i> Ver Aviso de Privacidad</a>
+                <div class="login-footer-card" style="cursor: pointer; text-align: center; margin-top: 15px;">
+                    <a href="#" id="login-privacy-link" style="color: var(--text-muted); text-decoration: underline; font-size: 0.8rem;"><i class="fa-solid fa-shield-halved"></i> Ver Aviso de Privacidad</a>
                 </div>
             </div>
         </div>
@@ -81,7 +108,7 @@
                 </div>
             </div>
 
-            <nav class="sidebar-nav">
+            <nav class="sidebar-nav" id="doctor-nav">
                 <a href="#" class="nav-item active" data-target="dashboard-section"><i
                         class="fa-solid fa-border-all"></i> Inicio</a>
                 <a href="#" class="nav-item" data-target="patients-section"><i class="fa-solid fa-users"></i> Directorio
@@ -90,6 +117,12 @@
                     Expedientes (NFC)</a>
                 <a href="#" class="nav-item admin-only" data-target="admin-section" style="display:none;"><i
                         class="fa-solid fa-shield-halved"></i> Panel de Control</a>
+            </nav>
+
+            <nav class="sidebar-nav" id="patient-nav" style="display: none;">
+                <a href="#" class="nav-item active" data-target="patient-portal-section"><i class="fa-solid fa-hospital-user"></i> Mi Expediente</a>
+                <a href="#" class="nav-item" data-target="patient-chat-section"><i class="fa-solid fa-comments"></i> Mensajes con Médico</a>
+                <a href="#" class="nav-item text-danger" id="nav-btn-call-doctor" style="border-top: 1px dashed var(--border-color); margin-top: 10px; padding-top: 10px;"><i class="fa-solid fa-phone-volume"></i> Llamar al Doctor</a>
             </nav>
 
             <div class="sidebar-footer">
@@ -254,10 +287,11 @@
                 <!-- Patient Data View -->
                 <div id="patient-data-view" style="display:none;">
                     <div class="action-bar">
-                        <div class="action-title"><i class="fa-solid fa-bolt"></i> Acciones Rápidas</div>
-                        <div class="action-buttons">
+                        <div class="action-title"><i></i> Acciones Rápidas</div>
+                        <div class="action-buttons" style="display: flex; gap: 10px; flex-wrap: wrap;">
                             <button class="btn-primary" id="btn-add-note"><i class="fa-solid fa-file-medical"></i>
                                 Agregar Nota Clínica</button>
+                            <button class="btn-secondary" id="btn-export-fhir" style="display: flex; align-items: center; gap: 5px; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.8rem; cursor: pointer; background: white; color: var(--primary); border: 1.5px solid var(--primary); transition: all 0.2s ease;"><i class="fa-solid fa-file-export"></i> Exportar FHIR HL7</button>
                         </div>
                     </div>
 
@@ -285,6 +319,49 @@
                                     <strong>ALERGIAS CRÍTICAS</strong>
                                     <p id="pat-allergies">Ninguna reportada</p>
                                 </div>
+                            </div>
+                            <!-- Consent Signature (LFPDPPP) -->
+                            <div id="consent-signature-area" style="margin-top: 15px; padding: 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; display: none; align-items: center; gap: 8px; animation: slideIn 0.3s ease-out;">
+                                <i class="fa-solid fa-circle-check" style="color: #16a34a; font-size: 1.1rem;"></i>
+                                <div style="flex: 1;">
+                                    <strong style="font-size: 0.72rem; color: #15803d; display: block;">CONSENTIMIENTO LEGAL</strong>
+                                    <span style="font-size: 0.62rem; color: #166534; display: block;">Firmado digitalmente (LFPDPPP)</span>
+                                </div>
+                                <button type="button" id="btn-view-signature" style="background: none; border: none; color: #15803d; font-size: 0.68rem; font-weight: bold; cursor: pointer; text-decoration: underline; padding: 2px 5px;">Ver Firma</button>
+                            </div>
+                        </div>
+
+                        <!-- Propiedad Médica Card -->
+                        <div class="patient-card team-ownership-card" style="margin-top: 20px;">
+                            <h4 style="margin: 0 0 15px 0; color: var(--primary); font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
+                                <i class="fa-solid fa-people-group"></i> Equipo Médico Asignado
+                            </h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="detail-group">
+                                    <label>ESPECIALIDAD CLÍNICA</label>
+                                    <p id="pat-specialty" class="font-bold" style="color: var(--text-main); font-size: 0.85rem; margin-top: 3px;">Cardiología</p>
+                                </div>
+                                <div class="detail-group">
+                                    <label>DOCTOR RESPONSABLE</label>
+                                    <p id="pat-primary-doc" class="font-bold text-primary" style="font-size: 0.85rem; margin-top: 3px;">Dr. Ramírez</p>
+                                </div>
+                            </div>
+                            <div class="detail-group" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+                                <label>MÉDICOS COLABORADORES</label>
+                                <p id="pat-secondary-docs" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 3px;">Ninguno</p>
+                            </div>
+                            <div class="detail-group" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+                                <label>ÚLTIMA MODIFICACIÓN</label>
+                                <p id="pat-last-mod" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">Por: -- el --</p>
+                            </div>
+                            <div class="priority-toggle-container" id="doc-priority-panel" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--border-color); display: flex; align-items: center; justify-content: space-between;">
+                                <span style="font-size: 0.75rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 5px;">
+                                    <i class="fa-solid fa-star" style="color:#eab308"></i> Paciente Prioritario
+                                </span>
+                                <label class="switch" style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                                    <input type="checkbox" id="pat-priority-checkbox" style="opacity: 0; width: 0; height: 0;">
+                                    <span class="slider round"></span>
+                                </label>
                             </div>
                         </div>
 
@@ -316,6 +393,35 @@
                             <div id="notes-container" class="notes-list">
                                 <!-- Notes injected via JS -->
                                 <div class="loading-spinner">Cargando historial...</div>
+                            </div>
+                        </div>
+
+                        <!-- Access Audit Logs (NOM-024) -->
+                        <div class="notes-section" style="grid-column: span 1;">
+                            <div class="section-title">
+                                <h3>Bitácora de Seguridad (NOM-024-SSA3-2012)</h3>
+                                <i class="fa-solid fa-shield-halved" style="color: var(--primary);"></i>
+                            </div>
+                            <div id="audit-logs-container" class="notes-list" style="max-height: 250px; overflow-y: auto;">
+                                <!-- Audit Logs injected via JS -->
+                                <div class="loading-spinner">Cargando bitácora de seguridad...</div>
+                            </div>
+                        </div>
+
+                        <!-- Portal de Chat Médico-Paciente -->
+                        <div class="notes-section" id="chat-section-card" style="grid-column: span 1; display: none;">
+                            <div class="section-title">
+                                <h3>Canal de Mensajería Directa</h3>
+                                <i class="fa-solid fa-comments text-primary"></i>
+                            </div>
+                            <div class="chat-box-container" style="display: flex; flex-direction: column; height: 250px; background: white; border-radius: 12px; border: 1px solid var(--border-color); overflow: hidden; margin-top: 10px;">
+                                <div id="chat-messages-display" style="flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; background: #f8fafc; font-size: 0.78rem;">
+                                    <!-- Inyectado vía JS -->
+                                </div>
+                                <form id="chat-send-form" style="display: flex; padding: 8px; border-top: 1px solid var(--border-color); background: white; gap: 6px; margin: 0;">
+                                    <input type="text" id="chat-input-text" placeholder="Escribe un mensaje para el paciente..." style="flex:1; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.78rem;" required>
+                                    <button type="submit" class="btn-primary" style="padding: 8px 12px; border-radius: 6px; width: auto; font-size: 0.78rem; margin: 0;"><i class="fa-solid fa-paper-plane"></i></button>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -350,6 +456,125 @@
                     </div>
                 </div>
             </section>
+
+            <!-- Patient Portal Section -->
+            <section id="patient-portal-section" class="content-section">
+                <div class="section-header">
+                    <div>
+                        <h2>Mi Expediente Clínico电子</h2>
+                        <p>Información en tiempo real de tu pulsera MediBand</p>
+                    </div>
+                    <button class="btn-primary" id="btn-patient-emergency-call" style="background: #ef4444;"><i class="fa-solid fa-phone-volume"></i> Llamar al Doctor</button>
+                </div>
+
+                <div class="records-grid">
+                    <!-- Patient Profile Card -->
+                    <div class="patient-card">
+                        <div class="patient-header">
+                            <div class="patient-avatar" style="background: var(--primary);"><i class="fa-solid fa-hospital-user"></i></div>
+                            <h3 id="portal-pat-name">Cargando...</h3>
+                            <span>ID Pulsera: <span id="portal-pat-id">--</span></span>
+                        </div>
+                        <div class="patient-details">
+                            <div class="detail-group">
+                                <label>FECHA DE NACIMIENTO</label>
+                                <p id="portal-pat-dob">--</p>
+                            </div>
+                            <div class="detail-group">
+                                <label>GRUPO SANGUÍNEO</label>
+                                <p id="portal-pat-blood" class="text-danger font-bold">--</p>
+                            </div>
+                        </div>
+                        <div class="critical-allergies">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <div>
+                                <strong>ALERGIAS REPORTADAS</strong>
+                                <p id="portal-pat-allergies">Ninguna</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Medical Assignment & Vitals -->
+                    <div style="display: flex; flex-direction: column; gap: 20px;">
+                        <div class="patient-card">
+                            <h4 style="margin: 0 0 15px 0; color: var(--primary); font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
+                                <i class="fa-solid fa-user-doctor"></i> Médico y Especialidad Asignados
+                            </h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div class="detail-group">
+                                    <label>ESPECIALIDAD</label>
+                                    <p id="portal-pat-specialty" class="font-bold">--</p>
+                                </div>
+                                <div class="detail-group">
+                                    <label>MÉDICO EN CARGO</label>
+                                    <p id="portal-pat-doctor" class="font-bold text-primary">--</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="vitals-row" style="margin: 0;">
+                            <div class="vital-card">
+                                <div class="vital-head"><span>RITMO CARDÍACO</span> <i class="fa-solid fa-heart-pulse text-danger"></i></div>
+                                <div class="vital-value" id="portal-pat-hr">-- <span>lpm</span></div>
+                            </div>
+                            <div class="vital-card">
+                                <div class="vital-head"><span>PRESIÓN ARTERIAL</span> <i class="fa-solid fa-stethoscope text-primary"></i></div>
+                                <div class="vital-value" id="portal-pat-bp">--/-- <span>mmHg</span></div>
+                            </div>
+                            <div class="vital-card">
+                                <div class="vital-head"><span>TEMPERATURA</span> <i class="fa-solid fa-temperature-half"></i></div>
+                                <div class="vital-value" id="portal-pat-temp">-- <span>°C</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Clinical Notes / Treatment Plan -->
+                    <div class="notes-section" style="grid-column: span 2;">
+                        <div class="section-title">
+                            <h3>Historial de Tratamientos y Consultas</h3>
+                            <i class="fa-solid fa-notes-medical" style="color: var(--primary);"></i>
+                        </div>
+                        <div id="portal-notes-container" class="notes-list">
+                            <div class="loading-spinner">Cargando tus notas médicas...</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Patient Chat Section -->
+            <section id="patient-chat-section" class="content-section">
+                <div class="section-header">
+                    <div>
+                        <h2>Mensajería Directa con Guardia Médica</h2>
+                        <p>Canal de comunicación seguro (LFPDPPP)</p>
+                    </div>
+                </div>
+
+                <div class="table-card" style="padding: 20px; max-width: 800px; margin: 0 auto;">
+                    <!-- Alert if patient chat is locked -->
+                    <div id="portal-chat-locked-alert" style="background: #f1f5f9; border-left: 4px solid var(--text-muted); padding: 15px; border-radius: 8px; margin-bottom: 20px; display: none;">
+                        <div style="display: flex; gap: 10px; align-items: flex-start;">
+                            <i class="fa-solid fa-circle-info" style="color: var(--text-muted); font-size: 1.2rem; margin-top: 2px;"></i>
+                            <div>
+                                <strong style="font-size: 0.85rem; color: var(--text-main);">Comunicación No Prioritaria</strong>
+                                <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">
+                                    Tu médico no ha marcado tu estado actual como "Prioritario". Para evitar saturación del personal clínico, el chat de dudas se habilita únicamente cuando el médico a cargo activa la prioridad en tu expediente. Si tienes una urgencia real, utiliza el botón de <strong>Llamar al Doctor</strong>.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chat-box-container" style="display: flex; flex-direction: column; height: 400px; background: white; border-radius: 12px; border: 1px solid var(--border-color); overflow: hidden;">
+                        <div id="portal-chat-messages-display" style="flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #f8fafc; font-size: 0.82rem;">
+                            <!-- Chat messages injected via JS -->
+                        </div>
+                        <form id="portal-chat-send-form" style="display: flex; padding: 12px; border-top: 1px solid var(--border-color); background: white; gap: 8px; margin: 0;">
+                            <input type="text" id="portal-chat-input-text" placeholder="Escribe tu mensaje para el equipo médico..." style="flex:1; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.82rem;" required>
+                            <button type="submit" id="portal-chat-submit-btn" class="btn-primary" style="padding: 10px 20px; border-radius: 8px; width: auto; font-size: 0.82rem; margin: 0;"><i class="fa-solid fa-paper-plane"></i> Enviar</button>
+                        </form>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -365,6 +590,30 @@
             </div>
             <div class="modal-body">
                 <form id="note-form">
+                    <!-- Emergency Shift Override Panel -->
+                    <div id="shift-override-panel" style="display: none; background: #fffbeb; border: 1.5px solid #fef3c7; border-radius: 8px; padding: 12px; margin-bottom: 15px; animation: slideIn 0.3s ease;">
+                        <span style="font-size: 0.75rem; font-weight: bold; color: #b45309; display: block; margin-bottom: 5px;">
+                            <i class="fa-solid fa-triangle-exclamation"></i> NOTA CREADA EN OTRO TURNO
+                        </span>
+                        <p style="font-size: 0.7rem; color: #78350f; margin-bottom: 10px; line-height: 1.3;">
+                            Esta nota fue creada por el <strong>Dr. <span id="override-note-author">--</span></strong> en el turno <strong><span id="override-note-shift">--</span></strong>. Para modificarla desde tu turno actual, debes justificar una Autorización de Emergencia en cumplimiento con la NOM-024.
+                        </p>
+                        <div class="input-group" style="margin: 0;">
+                            <label style="font-size: 0.65rem; color: #b45309; font-weight: bold;">JUSTIFICACIÓN DE LA AUTORIZACIÓN (NOM-024)</label>
+                            <input type="text" id="override-justification-input" placeholder="Ej. Paciente crítico requiere ajuste de dosis inmediato en cambio de guardia..." style="padding: 8px; border-radius: 6px; border: 1px solid #fcd34d; width: 100%; font-size: 0.75rem; background: #fff;">
+                        </div>
+                    </div>
+
+                    <div class="input-group" style="margin-bottom: 15px;">
+                        <label>TIPO DE EVENTO CLÍNICO</label>
+                        <select id="note-event-type" class="w-100"
+                            style="padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color);">
+                            <option value="Evaluación General">Evaluación General</option>
+                            <option value="Cirugía">Cirugía (Desencadena Alerta)</option>
+                            <option value="Cambio de Medicamento">Cambio de Medicamento (Desencadena Alerta)</option>
+                            <option value="Operación Urgente">Operación Urgente (Desencadena Alerta)</option>
+                        </select>
+                    </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                         <!-- Col Left: Subjetivo y Objetivo -->
                         <div>
@@ -402,6 +651,11 @@
                                         <input type="text" id="note-spo2" placeholder="SpO2 (%)"
                                             style="padding-left: 25px;">
                                     </div>
+                                </div>
+                                <!-- Triage Manchester Dynamic Calculator -->
+                                <div id="triage-calculator-panel" style="margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--bg-color); border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between;">
+                                    <span style="font-size: 0.65rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;"><i class="fa-solid fa-heart-pulse"></i> Triage Manchester:</span>
+                                    <div id="triage-suggested-badge" style="background: #64748b; color: white; font-size: 0.65rem; font-weight: bold; padding: 4px 8px; border-radius: 4px; text-transform: uppercase;">Sin Evaluar</div>
                                 </div>
                             </div>
                         </div>
@@ -465,6 +719,14 @@
                             <option value="Neurología">Neurología</option>
                             <option value="Pediatría">Pediatría</option>
                             <option value="Urgencias">Urgencias</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>TURNO DE TRABAJO</label>
+                        <select id="doc-shift" class="w-100"
+                            style="padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color);">
+                            <option value="matutino">Matutino (Mañana)</option>
+                            <option value="nocturno">Nocturno (Noche)</option>
                         </select>
                     </div>
                     <div class="input-group">
@@ -539,9 +801,41 @@
                             </select>
                         </div>
                     </div>
+                    <div class="patient-details"
+                        style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border: none; padding: 0;">
+                        <div class="input-group">
+                            <label>ESPECIALIDAD MÉDICA</label>
+                            <select id="reg-specialty" class="w-100"
+                                style="padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color);">
+                                <option value="Cardiología">Cardiología</option>
+                                <option value="Neurología">Neurología</option>
+                                <option value="Pediatría">Pediatría</option>
+                                <option value="Urgencias">Urgencias</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label>DOCTOR RESPONSABLE</label>
+                            <select id="reg-primary-doc" class="w-100"
+                                style="padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color);">
+                                <option value="">Cargando médicos...</option>
+                            </select>
+                        </div>
+                    </div>
                     <div class="input-group">
                         <label>ALERGIAS CRÍTICAS</label>
                         <textarea id="reg-allergies" rows="2" placeholder="Ej: Penicilina, Látex..."></textarea>
+                    </div>
+
+                    <!-- Signature Pad (LFPDPPP) -->
+                    <div class="input-group">
+                        <label style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>FIRMA DE CONSENTIMIENTO DEL PACIENTE (LFPDPPP)</span>
+                            <button type="button" id="btn-clear-signature" style="background: none; border: none; color: var(--primary); font-size: 0.65rem; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 3px;"><i class="fa-solid fa-eraser"></i> Limpiar</button>
+                        </label>
+                        <div style="position: relative; border: 1px dashed var(--border-color); border-radius: 8px; background: white; height: 110px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                            <canvas id="signature-canvas" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; z-index: 2;"></canvas>
+                            <span id="signature-placeholder" style="color: var(--text-muted); pointer-events: none; font-size: 0.72rem; z-index: 1; display: flex; align-items: center; gap: 5px;"><i class="fa-solid fa-signature"></i> Firme aquí con dedo o ratón</span>
+                        </div>
                     </div>
 
                     <!-- Privacy Checkbox -->
@@ -598,9 +892,69 @@
         </div>
     </div>
 
+    <!-- Modal for Viewing Signature -->
+    <div id="signature-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px; text-align: center;">
+            <div class="modal-header">
+                <h2>Firma de Consentimiento</h2>
+                <button class="close-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 15px 10px;">
+                <div style="border: 1px dashed var(--border-color); border-radius: 8px; padding: 10px; background: white; display: inline-block; width: 100%; box-sizing: border-box;">
+                    <img id="signature-img-preview" src="" alt="Firma del Paciente" style="max-width: 100%; max-height: 140px; display: block; margin: 0 auto;">
+                </div>
+                <p style="font-size: 0.72rem; color: var(--text-muted); margin-top: 15px; line-height: 1.4; text-align: justify; padding: 0 5px;">
+                    Esta firma digitalizada constituye el otorgamiento formal y expreso del consentimiento por parte del titular de los datos personales sensibles para su tratamiento, almacenamiento y transferencia electrónica con fines de atención médico-hospitalaria en cumplimiento con la ley **LFPDPPP** y las normas **NOM-004-SSA3-2012** y **NOM-024-SSA3-2012** vigentes en los Estados Unidos Mexicanos.
+                </p>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div id="toast-container"
         style="position: fixed; bottom: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 10px;">
+    </div>
+
+    <!-- Modal for Emergency Alert (Screen Lock for Doctors) -->
+    <div id="emergency-alert-modal" class="modal" style="display: none;">
+        <div class="emergency-alert-card">
+            <div class="alert-icon-ring">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <h2 style="color: #ef4444; font-size: 1.8rem; margin-bottom: 10px;">¡ALERTA DE EMERGENCIA CLÍNICA!</h2>
+            <p id="emergency-alert-specialty" style="font-weight: 700; color: var(--text-main); font-size: 1rem; margin-bottom: 15px; text-transform: uppercase;">Cardiología</p>
+            
+            <div style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; margin-bottom: 25px; text-align: left; font-size: 0.85rem;">
+                <p style="margin-bottom: 8px;"><strong>Paciente:</strong> <span id="emergency-alert-patient">--</span></p>
+                <p style="margin-bottom: 8px;"><strong>Evento:</strong> <span id="emergency-alert-procedure" style="color: #ef4444; font-weight: bold;">--</span></p>
+                <p style="margin-bottom: 8px;"><strong>Tratamiento:</strong> <span id="emergency-alert-treatment">--</span></p>
+                <p style="margin: 0;"><strong>Autorizado por:</strong> <span id="emergency-alert-doctor">--</span></p>
+            </div>
+            
+            <button id="btn-confirm-emergency" class="btn-primary w-100" style="background: #ef4444; padding: 14px; font-weight: bold; font-size: 1rem; margin-top: 10px; border: none; color: white;">
+                <i class="fa-solid fa-circle-check"></i> CONFIRMAR RECEPCIÓN DE ALERTA
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal for Simulated Emergency Call -->
+    <div id="simulated-call-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px; text-align: center; background: linear-gradient(135deg, #1e293b, #0f172a); color: white; border: none;">
+            <div class="alert-icon-ring" style="background: rgba(239, 68, 68, 0.2); color: #ef4444; margin-top: 20px;">
+                <i class="fa-solid fa-phone-volume"></i>
+            </div>
+            <h2 style="font-size: 1.5rem; margin-bottom: 10px;">Llamando a Especialidad</h2>
+            <p id="call-specialty-name" style="color: #94a3b8; font-size: 1rem; margin-bottom: 30px;">--</p>
+            
+            <div class="call-animation" style="margin-bottom: 30px;">
+                <div class="dot-flashing" style="display: inline-block; width: 10px; height: 10px; border-radius: 5px; background-color: #ef4444; color: #ef4444; animation: dotFlashing 1s infinite linear alternate;"></div>
+                <span style="font-size: 0.9rem; color: #94a3b8; margin-left: 10px;">Conectando con guardia de turno...</span>
+            </div>
+            
+            <button id="btn-cancel-call" class="btn-primary w-100" style="background: #ef4444; border: none; padding: 12px; font-weight: bold; color: white;">
+                <i class="fa-solid fa-phone-slash"></i> Cancelar Llamada
+            </button>
+        </div>
     </div>
 
     <!-- Firebase SDKs (Modular) -->
