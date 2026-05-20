@@ -891,29 +891,34 @@ textarea:focus {
         transform: translateX(-100%);
         left: 0;
         top: 0;
-        height: 100vh;
+        height: 100dvh !important;
         z-index: 10000;
         box-shadow: 10px 0 30px rgba(0,0,0,0.1);
         display: flex !important;
         flex-direction: column !important;
-        overflow-y: auto;
+        overflow: hidden !important;
     }
     
     .sidebar.mobile-active {
         transform: translateX(0);
     }
     
+    .sidebar-nav {
+        overflow-y: auto !important;
+        flex: 1 !important;
+    }
+    
     /* Logout siempre visible en sidebar móvil */
     .sidebar-footer {
-        position: sticky;
-        bottom: 0;
         background: var(--sidebar-bg);
         z-index: 1;
+        flex-shrink: 0 !important;
+        padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important;
     }
 
     .main-content {
         width: 100% !important;
-        height: 100vh;
+        height: 100dvh !important;
         overflow-y: auto;
     }
 
@@ -1011,5 +1016,6 @@ textarea:focus {
 
     .sidebar-footer {
         padding: 12px;
+        padding-bottom: calc(15px + env(safe-area-inset-bottom)) !important;
     }
 }
