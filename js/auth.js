@@ -78,6 +78,9 @@ export function monitorAuthState(onLogin, onLogout) {
         if (user) {
             // Fetch additional profile data from Firestore
             const profile = await getUserProfile(user.uid);
+            if (profile) {
+                profile.uid = user.uid;
+            }
             currentUserProfile = profile;
             onLogin(user, profile);
         } else {

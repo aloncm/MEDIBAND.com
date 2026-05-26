@@ -353,20 +353,28 @@ export async function sendEmergencyAlert(alertData) {
     }
 }
 
-// Listen to Emergency Alerts in real-time
-export function listenEmergencyAlerts(specialty, callback) {
-    const q = query(
-        collection(db, "emergency_alerts"),
-        where("specialty", "==", specialty),
-        orderBy("timestamp", "desc")
-    );
+// Listen to Emergency Alerts in real-time (Specialty or Directed to Doctor)
+export function listenEmergencyAlerts(specialty, doctorId, callback) {
+    const q = query(collection(db, "emergency_alerts"));
     
     // Returns the unsubscribe function
     return onSnapshot(q, (snapshot) => {
         const alerts = [];
         snapshot.forEach((doc) => {
-            alerts.push({ id: doc.id, ...doc.data() });
+            const data = doc.data();
+            // Filter by doctor's specialty department OR directly targeted to this doctor
+            if (data.specialty === specialty || (doctorId && data.targetDoctorId === doctorId)) {
+                alerts.push({ id: doc.id, ...data });
+            }
         });
+        
+        // Sort in memory by timestamp (descending) to avoid needing Firestore Index
+        alerts.sort((a, b) => {
+            const timeA = a.timestamp?.seconds || 0;
+            const timeB = b.timestamp?.seconds || 0;
+            return timeB - timeA;
+        });
+        
         callback(alerts);
     }, (error) => {
         console.error("Error listening to alerts:", error);
@@ -388,7 +396,7 @@ export async function confirmAlertReception(alertId, doctorUid) {
 }
 
 // Send Chat Message
-export async function sendChatMessage(patientId, senderId, senderName, senderRole, text) {
+export async function sendChatMessage(patientId, senderId, senderName, senderRole, text, primaryDoctorId = "") {
     try {
         await addDoc(collection(db, "messages"), {
             patientId,
@@ -396,6 +404,7 @@ export async function sendChatMessage(patientId, senderId, senderName, senderRol
             senderName,
             senderRole,
             text,
+            primaryDoctorId,
             timestamp: serverTimestamp()
         });
         return true;
@@ -409,8 +418,33 @@ export async function sendChatMessage(patientId, senderId, senderName, senderRol
 export function listenChatMessages(patientId, callback) {
     const q = query(
         collection(db, "messages"),
-        where("patientId", "==", patientId),
-        orderBy("timestamp", "asc")
+        where("patientId", "==", patientId)
+    );
+    
+    return onSnapshot(q, (snapshot) => {
+        const messages = [];
+        snapshot.forEach((doc) => {
+            messages.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // Sort in memory by timestamp (ascending) to avoid needing Firestore Index
+        messages.sort((a, b) => {
+            const timeA = a.timestamp?.seconds || 0;
+            const timeB = b.timestamp?.seconds || 0;
+            return timeA - timeB;
+        });
+        
+        callback(messages);
+    }, (error) => {
+        console.error("Error listening to messages:", error);
+    });
+}
+
+// Listen to Doctor's assigned patients messages in real-time
+export function listenDoctorMessages(doctorId, callback) {
+    const q = query(
+        collection(db, "messages"),
+        where("primaryDoctorId", "==", doctorId)
     );
     
     return onSnapshot(q, (snapshot) => {
@@ -420,7 +454,7 @@ export function listenChatMessages(patientId, callback) {
         });
         callback(messages);
     }, (error) => {
-        console.error("Error listening to messages:", error);
+        console.error("Error listening to doctor messages:", error);
     });
 }
 

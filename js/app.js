@@ -17,7 +17,8 @@ import {
     listenEmergencyAlerts,
     confirmAlertReception,
     sendChatMessage,
-    listenChatMessages
+    listenChatMessages,
+    listenDoctorMessages
 } from './database.js';
 
 // DOM Elements
@@ -61,21 +62,56 @@ let currentLoginType = 'doctor'; // 'doctor' or 'patient'
 let alertsUnsubscribe = null;
 let currentChatUnsubscribe = null;
 let patientProfileUnsubscribe = null;
+let doctorMessagesUnsubscribe = null;
+let lastKnownDoctorMessageCount = -1;
 
 // Audio context & generators
 let audioCtx = null;
 let alarmInterval = null;
 let simulatedCallInterval = null;
+let lastPatientPortalMessageId = null;
+let lastDoctorChatMessageId = null;
 
-// Play alternating premium clinical beeps (Web Audio API)
-function playClinicalAlarm() {
-    if (alarmInterval) return;
+function ensureAudioContext() {
     if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
     if (audioCtx.state === 'suspended') {
         audioCtx.resume();
     }
+}
+
+function playAudioTone(frequency = 880, duration = 0.14, type = 'sine') {
+    try {
+        ensureAudioContext();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = frequency;
+        osc.type = type;
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.24, audioCtx.currentTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + duration + 0.02);
+    } catch (err) {
+        console.error('Audio tone error:', err);
+    }
+}
+
+function playMessageSentSound() {
+    playAudioTone(1080, 0.12, 'triangle');
+}
+
+function playMessageReceivedSound() {
+    playAudioTone(740, 0.14, 'triangle');
+}
+
+// Play alternating premium clinical beeps (Web Audio API)
+function playClinicalAlarm() {
+    if (alarmInterval) return;
+    ensureAudioContext();
     let alternating = true;
     alarmInterval = setInterval(() => {
         try {
@@ -157,14 +193,19 @@ function cleanupActiveListeners() {
         patientProfileUnsubscribe();
         patientProfileUnsubscribe = null;
     }
+    if (doctorMessagesUnsubscribe) {
+        doctorMessagesUnsubscribe();
+        doctorMessagesUnsubscribe = null;
+    }
+    lastKnownDoctorMessageCount = -1;
     stopClinicalAlarm();
     stopRingingTone();
 }
 
 // Start emergency alert listener for Doctors
-function startDoctorAlertsListener(specialty) {
+function startDoctorAlertsListener(specialty, doctorId) {
     if (alertsUnsubscribe) return;
-    alertsUnsubscribe = listenEmergencyAlerts(specialty, (alerts) => {
+    alertsUnsubscribe = listenEmergencyAlerts(specialty, doctorId, (alerts) => {
         const profile = getCurrentProfile();
         if (!profile || profile.role !== 'doctor') return;
         
@@ -204,6 +245,38 @@ function startDoctorAlertsListener(specialty) {
             stopClinicalAlarm();
             document.getElementById('emergency-alert-modal').style.display = 'none';
         }
+    });
+}
+
+// Start real-time messages listener for Doctor's assigned patients
+function startDoctorMessagesListener(doctorId) {
+    if (doctorMessagesUnsubscribe || !doctorId) return;
+    
+    lastKnownDoctorMessageCount = -1;
+    doctorMessagesUnsubscribe = listenDoctorMessages(doctorId, (messages) => {
+        // If first load, establish base count and return
+        if (lastKnownDoctorMessageCount === -1) {
+            lastKnownDoctorMessageCount = messages.length;
+            return;
+        }
+        
+        // If a new message arrived
+        if (messages.length > lastKnownDoctorMessageCount) {
+            // Sort in memory to get the latest message
+            messages.sort((a, b) => {
+                const timeA = a.timestamp?.seconds || 0;
+                const timeB = b.timestamp?.seconds || 0;
+                return timeB - timeA;
+            });
+            const latestMsg = messages[0];
+            
+            // Only alert if the logged-in doctor is NOT the sender of this message
+            if (latestMsg && latestMsg.senderId !== doctorId) {
+                playMessageReceivedSound();
+                showToast(`Mensaje Clínico de ${latestMsg.senderName}: "${latestMsg.text.substring(0, 30)}..."`, "info");
+            }
+        }
+        lastKnownDoctorMessageCount = messages.length;
     });
 }
 
@@ -286,10 +359,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadDashboardStats();
                 loadPatientDirectory();
                 
-                // Monitor alerts for Doctor's department
+                // Monitor alerts and messages for Doctor
                 if (profile.department) {
-                    startDoctorAlertsListener(profile.department);
+                    startDoctorAlertsListener(profile.department, profile.uid);
                 }
+                startDoctorMessagesListener(profile.uid);
             }
         } else {
             userNameEl.textContent = user.email;
@@ -385,7 +459,8 @@ function setupEventListeners() {
                 btn.disabled = false;
             }
         } else {
-            const patientId = document.getElementById('patient-login-id').value;
+            const patientIdRaw = document.getElementById('patient-login-id').value;
+            const patientId = patientIdRaw.trim().replace(/^#/, '');
             const dob = document.getElementById('patient-login-dob').value;
             if (!patientId || !dob) {
                 errorEl.textContent = "Por favor ingrese el ID NFC y la Fecha de Nacimiento.";
@@ -393,9 +468,16 @@ function setupEventListeners() {
                 btn.disabled = false;
                 return;
             }
-            const result = await loginPatient(patientId, dob);
-            if (!result.success) {
-                errorEl.textContent = result.message;
+            try {
+                const result = await loginPatient(patientId, dob);
+                if (!result.success) {
+                    errorEl.textContent = result.message;
+                    btn.innerHTML = 'Entrar al Sistema <i class="fa-solid fa-arrow-right"></i>';
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                console.error("Login submission error:", err);
+                errorEl.textContent = "Error al iniciar sesión. Compruebe la conexión.";
                 btn.innerHTML = 'Entrar al Sistema <i class="fa-solid fa-arrow-right"></i>';
                 btn.disabled = false;
             }
@@ -911,6 +993,7 @@ async function startPatientPortal(patientProfile) {
     
     // 2. Real-time patient messages listener
     if (currentChatUnsubscribe) currentChatUnsubscribe();
+    lastPatientPortalMessageId = null;
     currentChatUnsubscribe = listenChatMessages(patientProfile.patientId, (messages) => {
         renderPatientChat(messages);
     });
@@ -923,8 +1006,13 @@ async function startPatientPortal(patientProfile) {
         const text = chatInput.value.trim();
         if (!text) return;
         
-        await sendChatMessage(patientProfile.patientId, patientProfile.uid, patientProfile.name, 'patient', text);
-        chatInput.value = '';
+        const success = await sendChatMessage(patientProfile.patientId, patientProfile.uid, patientProfile.name, 'patient', text, patientProfile.primaryDoctorId || "");
+        if (success) {
+            playMessageSentSound();
+            chatInput.value = '';
+        } else {
+            showToast('No se pudo enviar el mensaje. Intenta de nuevo.', 'error');
+        }
     };
 
     // 4. Emergency Call Button inside Patient Portal
@@ -939,14 +1027,15 @@ async function startPatientPortal(patientProfile) {
         
         playRingingTone();
         
-        // Trigger high-priority clinical alert to the target department
+        // Trigger high-priority clinical alert targeted specifically to their primary doctor
         sendEmergencyAlert({
             patientId: patientProfile.uid,
             patientName: patientProfile.name,
             procedure: "LLAMADA DE EMERGENCIA EN CAMA",
             medications: "El paciente ha activado el botón de emergencia en su Portal.",
             authorizedBy: "Auto-Llamado Paciente",
-            specialty: specialty
+            specialty: specialty,
+            targetDoctorId: patientProfile.primaryDoctorId || ""
         });
         
         document.getElementById('btn-cancel-call').onclick = () => {
@@ -1013,7 +1102,16 @@ function renderPatientChat(messages) {
     display.innerHTML = '';
     if (messages.length === 0) {
         display.innerHTML = '<p class="text-muted text-center" style="padding: 15px; font-size: 0.8rem;">No hay mensajes en este canal. Escribe tu duda o consulta.</p>';
+        lastPatientPortalMessageId = null;
         return;
+    }
+
+    const latestMessage = messages[messages.length - 1];
+    if (latestMessage.id !== lastPatientPortalMessageId) {
+        if (lastPatientPortalMessageId !== null && latestMessage.senderRole === 'doctor') {
+            playMessageReceivedSound();
+        }
+        lastPatientPortalMessageId = latestMessage.id;
     }
     
     messages.forEach(msg => {
@@ -1108,6 +1206,40 @@ async function loadPatientDetails(patientIdStr, docId = null) {
             await addAuditLog(patientData.id, "consult", doctorProfile);
         }
 
+        // Call Doctor in Charge Button for Interconsultation
+        const callDocInChargeBtn = document.getElementById('btn-call-doctor-in-charge');
+        if (callDocInChargeBtn) {
+            if (doctorProfile && doctorProfile.role === 'doctor' && patientData.primaryDoctorId && patientData.primaryDoctorId !== doctorProfile.uid) {
+                callDocInChargeBtn.style.display = 'inline-flex';
+                callDocInChargeBtn.onclick = () => {
+                    const specialty = patientData.specialty || 'General';
+                    const modal = document.getElementById('simulated-call-modal');
+                    document.getElementById('call-specialty-name').textContent = `DR. ${patientData.primaryDoctorName.toUpperCase()}`;
+                    modal.style.display = 'flex';
+                    
+                    playRingingTone();
+                    
+                    // Trigger high-priority clinical interconsultation alert directly to the primary doctor!
+                    sendEmergencyAlert({
+                        patientId: patientData.id,
+                        patientName: patientData.name,
+                        procedure: "INTERCONSULTA CLÍNICA DE URGENCIA",
+                        medications: `El Dr. ${doctorProfile.name} ha escaneado la pulsera y solicita tu apoyo inmediato.`,
+                        authorizedBy: `Dr. ${doctorProfile.name}`,
+                        specialty: specialty,
+                        targetDoctorId: patientData.primaryDoctorId
+                    });
+                    
+                    document.getElementById('btn-cancel-call').onclick = () => {
+                        stopRingingTone();
+                        modal.style.display = 'none';
+                    };
+                };
+            } else {
+                callDocInChargeBtn.style.display = 'none';
+            }
+        }
+
         // Signature consent display
         const consentArea = document.getElementById('consent-signature-area');
         const viewSigBtn = document.getElementById('btn-view-signature');
@@ -1134,6 +1266,7 @@ async function loadPatientDetails(patientIdStr, docId = null) {
         if (chatSectionCard) {
             chatSectionCard.style.display = 'block';
             if (currentChatUnsubscribe) currentChatUnsubscribe();
+            lastDoctorChatMessageId = null;
             currentChatUnsubscribe = listenChatMessages(patientData.patientId, (messages) => {
                 renderDoctorChat(messages, patientData.patientId);
             });
@@ -1146,8 +1279,13 @@ async function loadPatientDetails(patientIdStr, docId = null) {
                 if (!text) return;
                 
                 const profile = getCurrentProfile();
-                await sendChatMessage(patientData.patientId, profile.uid, profile.name, 'doctor', text);
-                chatInput.value = '';
+                const success = await sendChatMessage(patientData.patientId, profile.uid, profile.name, 'doctor', text, patientData.primaryDoctorId || "");
+                if (success) {
+                    playMessageSentSound();
+                    chatInput.value = '';
+                } else {
+                    showToast('No se pudo enviar el mensaje. Intenta de nuevo.', 'error');
+                }
             };
         }
         
@@ -1260,7 +1398,16 @@ function renderDoctorChat(messages, patientId) {
     display.innerHTML = '';
     if (messages.length === 0) {
         display.innerHTML = '<p class="text-muted text-center" style="padding: 10px; font-size: 0.72rem;">No hay mensajes en este canal clínico.</p>';
+        lastDoctorChatMessageId = null;
         return;
+    }
+
+    const latestMessage = messages[messages.length - 1];
+    if (latestMessage.id !== lastDoctorChatMessageId) {
+        if (lastDoctorChatMessageId !== null && latestMessage.senderRole === 'patient') {
+            playMessageReceivedSound();
+        }
+        lastDoctorChatMessageId = latestMessage.id;
     }
     
     messages.forEach(msg => {
